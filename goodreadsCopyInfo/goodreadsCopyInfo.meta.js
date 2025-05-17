@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads Copy Book Info
 // @namespace    https://github.com/laurinsorgend
-// @version      1.2
+// @version      1.3
 // @description  Adds a button to copy book information in a format ready for spreadsheet pasting
 // @author       laurin@sorgend.eu
 // @match        https://www.goodreads.com/book/show/*

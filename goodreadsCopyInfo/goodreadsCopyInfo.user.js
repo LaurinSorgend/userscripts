@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads Copy Book Info
 // @namespace    https://github.com/laurinsorgend
-// @version      1.2
+// @version      1.3
 // @description  Adds a button to copy book information in a format ready for spreadsheet pasting
 // @author       laurin@sorgend.eu
 // @match        https://www.goodreads.com/book/show/*
@@ -260,7 +260,7 @@
         const currentDate = new Date().toLocaleDateString("en-UK", options);
 
         // Book | Series Name | Series | Type | Pages | Rating | GoodReads | Author | Narrator | Published | Times Read | Plan | Date Added | Recommended By | Link
-        const type = '';
+        let type = '';
         if (pages <= 40) {
             type = 'Short Story';
         } else if (pages <= 300) {
