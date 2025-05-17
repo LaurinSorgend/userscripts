@@ -38,7 +38,7 @@ These scripts require a userscript manager extension to be installed in your bro
 This script adds a "Copy Info" button to Goodreads book pages that copies book information in a format ready to be pasted into spreadsheets.
 
 #### Output Format
-The script currently copies the info with specific tab formatting (that I use for my google sheet), but you can customize it by editing line 138 in the script to match your needs.
+The script currently copies the info with specific tab formatting (that I use for my google sheet), but you can customize it by editing the script to match your needs.
 
 
 ## License
