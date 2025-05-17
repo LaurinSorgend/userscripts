@@ -7,7 +7,7 @@ A collection of useful userscripts for enhancing various websites.
 ### 1. Goodreads Copy Book Info
 Adds a convenient "Copy Info" button to Goodreads book pages, making it easy to export book information.
 
-[View Script](./goodreadsCopyInfo/goodreadsCopyInfo.js) | [Install](https://github.com/LaurinSorgend/userscripts/raw/main/goodreadsCopyInfo/goodreadsCopyInfo.js)
+[View Script](./goodreadsCopyInfo/goodreadsCopyInfo.user.js) | [Install](https://github.com/LaurinSorgend/userscripts/raw/main/goodreadsCopyInfo/goodreadsCopyInfo.user.js)
 
 ## Prerequisites
 
