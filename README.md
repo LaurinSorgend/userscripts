@@ -11,6 +11,7 @@ Adds a convenient "Copy Info" button to Goodreads book pages, making it easy to 
 
 ### 2. Storygraph to Goodreads
 Adds a button to a Storygraph book page that redirects to a Goodreads search query with that books author and title.
+
 [View Script](./storygraphToGoodreads/storygraphToGoodreads.user.js) | [Install](https://github.com/LaurinSorgend/userscripts/raw/main/storygraphToGoodreads/storygraphToGoodreads.user.js)
 
 ## Prerequisites
