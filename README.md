@@ -9,6 +9,10 @@ Adds a convenient "Copy Info" button to Goodreads book pages, making it easy to 
 
 [View Script](./goodreadsCopyInfo/goodreadsCopyInfo.user.js) | [Install](https://github.com/LaurinSorgend/userscripts/raw/main/goodreadsCopyInfo/goodreadsCopyInfo.user.js)
 
+### 2. Storygraph to Goodreads
+Adds a button to a Storygraph book page that redirects to a Goodreads search query with that books author and title.
+[View Script](./storygraphToGoodreads/storygraphToGoodreads.user.js) | [Install](https://github.com/LaurinSorgend/userscripts/raw/main/storygraphToGoodreads/storygraphToGoodreads.user.js)
+
 ## Prerequisites
 
 These scripts require a userscript manager extension to be installed in your browser. I recommend using **Violentmonkey**.
@@ -36,6 +40,9 @@ These scripts require a userscript manager extension to be installed in your bro
 
 ### Goodreads Copy Book Info
 This script adds a "Copy Info" button to Goodreads book pages that copies book information in a format ready to be pasted into spreadsheets.
+
+### Storygraph to Goodreads
+Adds a button to a Storygraph book page that redirects to a Goodreads search query with that books author and title.
 
 #### Output Format
 The script currently copies the info with specific tab formatting (that I use for my google sheet), but you can customize it by editing the script to match your needs.
