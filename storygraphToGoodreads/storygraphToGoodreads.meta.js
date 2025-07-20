@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Storygraph to Goodreads Search
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0
+// @version      1.2
 // @description  Adds a button to redirect from Storygraph page to a Goodreads search with the book title and author
 // @author       laurin@sorgend.eu
 // @match        https://app.thestorygraph.com/books/*
