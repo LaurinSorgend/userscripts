@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads Copy Book Info
 // @namespace    https://github.com/laurinsorgend
-// @version      1.4
+// @version      1.5
 // @description  Adds a button to copy book information in a format ready for spreadsheet pasting
 // @author       laurin@sorgend.eu
 // @match        https://www.goodreads.com/book/show/*
@@ -484,7 +484,8 @@
         const personalRating = '';
         const goodreadsLink = window.location.href;
         const narrator = ''; 
-        const timesRead = ''; 
+        const timesRead = '';
+        const empty = ''
         const plan = '99'; 
         const recommendedBy = '';  
 
@@ -500,6 +501,8 @@
             narrator,
             publishDate,
             timesRead,
+            empty,
+            empty,
             plan,
             currentDate,
             recommendedBy,
