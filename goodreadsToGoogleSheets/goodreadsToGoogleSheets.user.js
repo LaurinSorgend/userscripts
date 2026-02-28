@@ -395,7 +395,8 @@
             if (!settings.spreadsheetId || !settings.sheetName) return [];
 
             const accessToken = await this.getAccessToken();
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${settings.sheetName}!1:1`;
+            const range = encodeURIComponent(`'${settings.sheetName}'!1:1`);
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}`;
 
             return new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
@@ -454,7 +455,8 @@
 
         makeApiRequest(data, settings, accessToken) {
             return new Promise((resolve, reject) => {
-                const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${settings.sheetName}:append?valueInputOption=USER_ENTERED`;
+                const range = encodeURIComponent(`'${settings.sheetName}'!A:A`);
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
 
                 // Only send the values (data row), ignoring headers to prevent duplicates on every append
                 const requestBody = {

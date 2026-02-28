@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      0.1
+// @version      1.0
 // @description  Adds a button to send book information directly to Google Sheets using Googles API
 // @author       laurin@sorgend.eu
 // @match        https://www.goodreads.com/book/show/*
