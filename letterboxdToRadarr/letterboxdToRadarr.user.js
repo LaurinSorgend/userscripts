@@ -26,36 +26,34 @@
     });
 
     function init() {
+        if (document.querySelector('.radarr-btn-injected')) return;
 
-        //get tmdb link
         const tmdbLink = document.querySelector('a[data-track-action="TMDB"]');
         if (!tmdbLink) return;
 
-        //get id
         const tmdbMatch = tmdbLink.href.match(/movie\/(\d+)/);
         if (!tmdbMatch) return;
         const tmdbId = tmdbMatch[1];
 
-        //get radarr url
         const radarrBase = GM_getValue("radarr_url", "http://localhost:7878");
         const radarrSearchUrl = `${radarrBase}/add/new?term=tmdb:${tmdbId}`;
 
-        //add button
         const radarrBtn = document.createElement('a');
-        radarrBtn.className = 'micro-button track-event';
+        radarrBtn.className = 'micro-button track-event radarr-btn-injected';
         radarrBtn.href = radarrSearchUrl;
         radarrBtn.target = '_blank';
-        radarrBtn.innerText = 'Radarr';
+        radarrBtn.textContent = 'Radarr';
 
-       
         tmdbLink.parentNode.appendChild(radarrBtn);
     }
 
-    //wait until tmbd button is loaded
+    let attempts = 0;
     const checkInterval = setInterval(() => {
         if (document.querySelector('a[data-track-action="TMDB"]')) {
             clearInterval(checkInterval);
             init();
+        } else if (++attempts > 20) {
+            clearInterval(checkInterval);
         }
     }, 500);
 

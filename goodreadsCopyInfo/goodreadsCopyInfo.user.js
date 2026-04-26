@@ -233,6 +233,10 @@
             this.save();
         }
 
+        asObject() {
+            return { ...this.settings };
+        }
+
         addCustomEmptyField(label) {
             const id = `custom_${Date.now()}`;
             this.settings.customEmptyFields.push({ id, label });
@@ -293,7 +297,7 @@
 
             for (const [key, definition] of Object.entries(definitions)) {
                 try {
-                    formatted[key] = definition.format(data[key], this.settings.settings);
+                    formatted[key] = definition.format(data[key], this.settings.asObject());
                 } catch (e) {
                     if (DEBUG) console.error(`Error formatting ${key}:`, e);
                     formatted[key] = data[key] || '';
@@ -783,15 +787,9 @@
         }
 
         static findButtonBar() {
-            let bar = document.querySelector('.BookActions');
-            if (!bar) {
-                bar = Array.from(document.querySelectorAll('div[class*="BookActions"]'))
-                    .find(el => el.className.includes('BookActions'));
-            }
-            if (!bar) {
-                bar = document.querySelector('.BookPage__rightColumn');
-            }
-            return bar;
+            return document.querySelector('.BookActions')
+                || document.querySelector('div[class*="BookActions"]')
+                || document.querySelector('.BookPage__rightColumn');
         }
     }
 
@@ -888,9 +886,5 @@
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initialize);
-    } else {
-        setTimeout(initialize, 500);
-    }
+    setTimeout(initialize, 500);
 })();

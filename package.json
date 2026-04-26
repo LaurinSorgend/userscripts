@@ -1,0 +1,22 @@
+{
+  "name": "userscripts",
+  "version": "1.0.0",
+  "description": "My browser userscripts",
+  "main": "index.js",
+  "scripts": {
+    "dev:sheets": "cd goodreadsToGoogleSheets && vite",
+    "build:sheets": "cd goodreadsToGoogleSheets && vite build"
+  },
+  "keywords": [],
+  "author": "laurin@sorgend.eu",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "vite-plugin-monkey": "^3.0.0",
+    "@types/bun": "latest"
+  },
+  "private": true,
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
