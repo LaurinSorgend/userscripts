@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev:sheets": "cd goodreadsToGoogleSheets && vite",
-    "build:sheets": "cd goodreadsToGoogleSheets && vite build"
+    "build:sheets": "cd goodreadsToGoogleSheets && vite build",
+    "dev:discogs": "cd discogsToGoogleSheets && vite",
+    "build:discogs": "cd discogsToGoogleSheets && vite build"
   },
   "keywords": [],
   "author": "laurin@sorgend.eu",
