@@ -1,5 +1,5 @@
 import { GM_xmlhttpRequest } from '$';
-import { KJUR } from 'jsrsasign';
+import KJUR from 'jsrsasign';
 
 export default class GoogleSheetsManager {
     constructor(settings) {

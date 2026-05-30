@@ -40,7 +40,7 @@ export default defineConfig({
       userscript: {
         name: 'Goodreads to Google Sheets',
         namespace: 'https://github.com/laurinsorgend',
-        version: '1.1',
+        version: '1.2',
         description: 'Adds a button to send book information directly to Google Sheets using Googles API',
         author: 'laurin@sorgend.eu',
         match: ['https://www.goodreads.com/book/show/*'],

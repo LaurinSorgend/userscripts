@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.1
+// @version      1.2
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send book information directly to Google Sheets using Googles API
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
@@ -17,7 +17,7 @@
 // @run-at       document-idle
 // ==/UserScript==
 
-(function (jsrsasign) {
+(function (KJUR) {
   'use strict';
 
   function getText(primary, fallbacks = []) {
@@ -395,7 +395,7 @@
       };
       const sHeader = JSON.stringify({ alg: "RS256", typ: "JWT" });
       const sPayload = JSON.stringify(claim);
-      const sJWT = jsrsasign.KJUR.jws.JWS.sign("RS256", sHeader, sPayload, serviceAccount.private_key);
+      const sJWT = KJUR.jws.JWS.sign("RS256", sHeader, sPayload, serviceAccount.private_key);
       return new Promise((resolve, reject) => {
         _GM_xmlhttpRequest({
           method: "POST",
