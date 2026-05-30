@@ -1,6 +1,6 @@
 # Discogs to Google Sheets
 
-Adds a small floating button bar to Discogs release / master pages that sends album information directly to a Google Sheet via the Google Sheets API. Mirrors the architecture of `goodreadsToGoogleSheets`.
+Adds a small floating button bar to Discogs release / master pages that sends album information directly to a Google Sheet via the Google Sheets API.
 
 ## Features
 
@@ -53,7 +53,6 @@ Identical to `goodreadsToGoogleSheets`:
 
 ## Matching the Album & Vinyl Tracker sheet
 
-The default field order matches the columns of the bundled `Album_Vinyl_Tracker.xlsx`
 Albums tab: Title · Artist · Type · Genre · Year · Label · Runtime (min) · Tracks ·
 Rating · Discogs · Format · Times Listened · Date Added · Recommended By · Cover URL · Discogs Link.
 
