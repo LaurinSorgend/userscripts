@@ -1,4 +1,5 @@
 import { GM_xmlhttpRequest } from '$';
+import { KJUR } from 'jsrsasign';
 
 export default class GoogleSheetsManager {
     constructor(settings) {
@@ -40,8 +41,7 @@ export default class GoogleSheetsManager {
         const sHeader = JSON.stringify({ alg: 'RS256', typ: 'JWT' });
         const sPayload = JSON.stringify(claim);
         
-        // KJUR is loaded globally via @require in vite config
-        const sJWT = window.KJUR.jws.JWS.sign("RS256", sHeader, sPayload, serviceAccount.private_key);
+        const sJWT = KJUR.jws.JWS.sign("RS256", sHeader, sPayload, serviceAccount.private_key);
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
