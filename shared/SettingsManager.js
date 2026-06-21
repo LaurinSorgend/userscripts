@@ -1,30 +1,43 @@
 import { GM_getValue, GM_setValue } from '$';
-import { DEFAULT_SETTINGS } from './constants.js';
 
+/**
+ * Shared settings store for the "*ToGoogleSheets" userscripts.
+ *
+ * Each project owns its own DEFAULT_SETTINGS (field order, formats, default
+ * sheet name, ...) and its own GM storage key, so both are passed in via the
+ * constructor. Everything else (custom/constant field handling, google sheets
+ * sub-object access, save/reset) is identical across scripts and lives here.
+ */
 export default class SettingsManager {
-    constructor() {
+    constructor({ storageKey = 'settings', defaultSettings } = {}) {
+        this.storageKey = storageKey;
+        this.defaultSettings = defaultSettings || {};
         this.settings = this.load();
     }
 
     load() {
         try {
-            const saved = GM_getValue('sg2gs_settings', null);
-            return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : { ...DEFAULT_SETTINGS };
+            const saved = GM_getValue(this.storageKey, null);
+            return saved
+                ? { ...this.defaultSettings, ...JSON.parse(saved) }
+                : { ...this.defaultSettings };
         } catch {
-            return { ...DEFAULT_SETTINGS };
+            return { ...this.defaultSettings };
         }
     }
 
     save() {
         try {
-            GM_setValue('sg2gs_settings', JSON.stringify(this.settings));
+            GM_setValue(this.storageKey, JSON.stringify(this.settings));
             return true;
         } catch {
             return false;
         }
     }
 
-    get(key) { return this.settings[key]; }
+    get(key) {
+        return this.settings[key];
+    }
 
     set(key, value) {
         this.settings[key] = value;
@@ -32,7 +45,7 @@ export default class SettingsManager {
     }
 
     reset() {
-        this.settings = { ...DEFAULT_SETTINGS };
+        this.settings = { ...this.defaultSettings };
         this.save();
     }
 
@@ -79,10 +92,12 @@ export default class SettingsManager {
         }
     }
 
-    asObject() { return { ...this.settings }; }
+    asObject() {
+        return { ...this.settings };
+    }
 
     getGoogleSheetsSettings() {
-        return this.settings.googleSheets || DEFAULT_SETTINGS.googleSheets;
+        return this.settings.googleSheets || this.defaultSettings.googleSheets;
     }
 
     setGoogleSheetsSettings(settings) {

@@ -7,7 +7,9 @@
     "dev:sheets": "cd goodreadsToGoogleSheets && vite",
     "build:sheets": "cd goodreadsToGoogleSheets && vite build",
     "dev:discogs": "cd discogsToGoogleSheets && vite",
-    "build:discogs": "cd discogsToGoogleSheets && vite build"
+    "build:discogs": "cd discogsToGoogleSheets && vite build",
+    "dev:storygraph": "cd storygraphToGoogleSheets && vite",
+    "build:storygraph": "cd storygraphToGoogleSheets && vite build"
   },
   "keywords": [],
   "author": "laurin@sorgend.eu",

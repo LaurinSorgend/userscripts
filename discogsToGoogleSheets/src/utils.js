@@ -1,26 +1,4 @@
-export function getText(primary, fallbacks = []) {
-    let el = document.querySelector(primary);
-    let i = 0;
-    while (!el && i < fallbacks.length) {
-        el = document.querySelector(fallbacks[i++]);
-    }
-    return el ? el.textContent.trim() : '';
-}
-
-export function waitForElement(selector, callback, checkFreq = 100, timeout = 15000) {
-    const start = Date.now();
-
-    function check() {
-        const el = document.querySelector(selector);
-        if (el) {
-            callback(el);
-        } else if (Date.now() - start < timeout) {
-            setTimeout(check, checkFreq);
-        }
-    }
-
-    check();
-}
+export { getText, waitForElement } from '../../shared/utils.js';
 
 /**
  * Parses the Discogs JSON-LD release/master schema embedded in the page.

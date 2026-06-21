@@ -1,12 +1,13 @@
-import { waitForElement } from './utils.js';
-import SettingsManager from './SettingsManager.js';
-import BookInfoExtractor from './BookInfoExtractor.js';
-import GoogleSheetsManager from './GoogleSheetsManager.js';
+import { waitForElement } from '../../shared/utils.js';
+import SettingsManager from '../../shared/SettingsManager.js';
+import InfoExtractor from '../../shared/InfoExtractor.js';
+import GoogleSheetsManager from '../../shared/GoogleSheetsManager.js';
 import UI from './UI.js';
+import { FIELD_DEFINITIONS, DEBUG, DEFAULT_SETTINGS } from './constants.js';
 
 function initialize() {
-    const settings = new SettingsManager();
-    const extractor = new BookInfoExtractor(settings);
+    const settings = new SettingsManager({ storageKey: 'sg2gs_settings', defaultSettings: DEFAULT_SETTINGS });
+    const extractor = new InfoExtractor(settings, { fieldDefinitions: FIELD_DEFINITIONS, debug: DEBUG });
     const sheetsManager = new GoogleSheetsManager(settings);
     let settingsModal = null;
 

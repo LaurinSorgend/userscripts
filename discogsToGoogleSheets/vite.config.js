@@ -56,13 +56,15 @@ export default defineConfig({
           'GM_addStyle',
           'GM_info'
         ],
-        require: [
-          'https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.9.0/jsrsasign-all-min.js'
-        ],
         updateURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/discogsToGoogleSheets/dist/${userscriptName}.meta.js`,
         downloadURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/discogsToGoogleSheets/dist/${userscriptName}.user.js`,
         supportURL: 'https://github.com/laurinsorgend/userscripts/issues',
         'run-at': 'document-idle'
+      },
+      build: {
+        externalGlobals: {
+          jsrsasign: ['KJUR', 'https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.9.0/jsrsasign-all-min.js'],
+        },
       },
     }),
     generateMetaJs()

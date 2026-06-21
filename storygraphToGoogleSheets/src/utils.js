@@ -1,19 +1,8 @@
-export function waitForElement(selector, callback, checkFreq = 100, timeout = 15000) {
-    const start = Date.now();
-    function check() {
-        const el = document.querySelector(selector);
-        if (el) {
-            callback(el);
-        } else if (Date.now() - start < timeout) {
-            setTimeout(check, checkFreq);
-        }
-    }
-    check();
-}
+export { waitForElement } from '../../shared/utils.js';
 
 /**
  * Parses a community review bar section by its heading text.
- * Returns a map of { label → percentage } in display order, or null if not found.
+ * Returns a map of { label -> percentage } in display order, or null if not found.
  */
 export function extractReviewSection(headingText) {
     const frame = document.querySelector('turbo-frame#community_reviews');
