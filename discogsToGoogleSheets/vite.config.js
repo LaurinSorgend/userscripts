@@ -40,7 +40,7 @@ export default defineConfig({
       userscript: {
         name: 'Discogs to Google Sheets',
         namespace: 'https://github.com/laurinsorgend',
-        version: '1.0',
+        version: '1.1',
         description: 'Adds a button to send album information from Discogs directly to Google Sheets',
         author: 'laurin@sorgend.eu',
         match: [
