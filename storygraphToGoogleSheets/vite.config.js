@@ -40,7 +40,7 @@ export default defineConfig({
       userscript: {
         name: 'StoryGraph to Google Sheets',
         namespace: 'https://github.com/laurinsorgend',
-        version: '1.1',
+        version: '1.2',
         description: 'Adds a button to send book information from StoryGraph directly to Google Sheets',
         author: 'laurin@sorgend.eu',
         match: ['https://app.thestorygraph.com/*'],
