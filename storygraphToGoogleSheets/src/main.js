@@ -1,4 +1,4 @@
-import { waitForElement } from '../../shared/utils.js';
+import { waitForElement, sendToSheet } from '../../shared/utils.js';
 import SettingsManager from '../../shared/SettingsManager.js';
 import InfoExtractor from '../../shared/InfoExtractor.js';
 import GoogleSheetsManager from '../../shared/GoogleSheetsManager.js';
@@ -36,14 +36,12 @@ function initialize() {
         try {
             label.textContent = ' Sending...';
             this.disabled = true;
-            await sheetsManager.appendToSheet(info);
-            label.textContent = original;
-            this.disabled = false;
-            UI.showNotification('Book sent to Google Sheets!');
+            await sendToSheet(sheetsManager, extractor, info, UI, 'Book');
         } catch (error) {
+            UI.showNotification(error.message, 5000, true);
+        } finally {
             label.textContent = original;
             this.disabled = false;
-            UI.showNotification(error.message, 5000, true);
         }
     };
 

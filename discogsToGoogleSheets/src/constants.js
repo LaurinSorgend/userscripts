@@ -14,7 +14,8 @@ export const DEFAULT_SETTINGS = {
         serviceAccountJson: '',
         spreadsheetId: '',
         sheetName: 'Albums',
-        columnMapping: []
+        columnMapping: [],
+        matchField: 'link'
     }
 };
 

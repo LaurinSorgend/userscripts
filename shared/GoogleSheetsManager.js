@@ -119,12 +119,161 @@ export default class GoogleSheetsManager {
         return this.makeApiRequest(formattedData, sheetsSettings, accessToken);
     }
 
-    formatDataForSheet(data) {
+    /**
+     * Send an item to the sheet, updating an existing row when one already holds
+     * the same value in the configured match field instead of appending a
+     * duplicate. Empty incoming values never overwrite existing data.
+     *
+     * @param {Object} data Formatted field map from the extractor.
+     * @param {Function} [resolveConflicts] async (diffs) => ({ [colIndex]: value })
+     *        | null. Called with the fields that would change so a UI can let the
+     *        user choose; returning null aborts the update.
+     * @returns {Promise<{action: 'appended'|'updated'|'unchanged'|'cancelled'}>}
+     */
+    async upsert(data, resolveConflicts) {
         const sheetsSettings = this.settings.getGoogleSheetsSettings();
-        const mapping = sheetsSettings.columnMapping;
-        const order = (mapping && mapping.length > 0) ? mapping : this.settings.get('fieldOrder');
+        if (!sheetsSettings.serviceAccountJson || !sheetsSettings.spreadsheetId || !sheetsSettings.sheetName) {
+            throw new Error('Google Sheets settings are not configured. Please open the settings modal to configure your credentials.');
+        }
 
-        const values = order.map(field => {
+        const order = this.getEffectiveOrder();
+        const newValues = this.formatDataForSheet(data).values;
+        const matchCol = order.indexOf(this.getMatchFieldKey());
+
+        if (matchCol === -1 || !this.normalize(newValues[matchCol])) {
+            await this._appendRow(newValues);
+            return { action: 'appended' };
+        }
+
+        const found = this.findExistingRow(await this.fetchRows(), matchCol, newValues[matchCol]);
+        if (!found) {
+            await this._appendRow(newValues);
+            return { action: 'appended' };
+        }
+
+        return this._mergeAndUpdate(order, newValues, found, resolveConflicts);
+    }
+
+    /** Resolve conflicts (optionally via the callback) and write the merged row. */
+    async _mergeAndUpdate(order, newValues, found, resolveConflicts) {
+        const merged = order.map((key, i) => (newValues[i] !== '' ? newValues[i] : (found.row[i] ?? '')));
+
+        const diffs = order.reduce((acc, key, i) => {
+            const incoming = newValues[i] ?? '';
+            const existing = found.row[i] ?? '';
+            if (incoming !== '' && incoming !== existing) acc.push({ index: i, key, existing, incoming });
+            return acc;
+        }, []);
+
+        if (diffs.length && typeof resolveConflicts === 'function') {
+            const resolution = await resolveConflicts(diffs);
+            if (resolution === null) return { action: 'cancelled' };
+            for (const idx of Object.keys(resolution)) merged[idx] = resolution[idx];
+        } else if (!diffs.length) {
+            return { action: 'unchanged' };
+        }
+
+        await this._updateRow(found.rowNumber, merged);
+        return { action: 'updated' };
+    }
+
+    /** Effective column order: explicit column mapping, else the field order. */
+    getEffectiveOrder() {
+        const mapping = this.settings.getGoogleSheetsSettings().columnMapping;
+        return (mapping && mapping.length > 0) ? mapping : this.settings.get('fieldOrder');
+    }
+
+    getMatchFieldKey() {
+        return this.settings.getGoogleSheetsSettings().matchField || 'link';
+    }
+
+    /** Loosely compare cell values (trim, lowercase, ignore trailing slash). */
+    normalize(value) {
+        return String(value ?? '').trim().toLowerCase().replace(/\/+$/, '');
+    }
+
+    /** All value rows of the sheet (including the header row). */
+    async fetchRows() {
+        const settings = this.settings.getGoogleSheetsSettings();
+        const accessToken = await this.getAccessToken();
+        const range = encodeURIComponent(`'${settings.sheetName}'`);
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}`;
+        const data = await this._request('GET', url, null, accessToken);
+        return data.values || [];
+    }
+
+    /** Find the first data row whose match column equals matchValue. */
+    findExistingRow(rows, matchCol, matchValue) {
+        const target = this.normalize(matchValue);
+        for (let i = 1; i < rows.length; i++) {
+            if (this.normalize(rows[i][matchCol]) === target) {
+                return { rowNumber: i + 1, row: rows[i] };
+            }
+        }
+        return null;
+    }
+
+    async _appendRow(values) {
+        const settings = this.settings.getGoogleSheetsSettings();
+        const accessToken = await this.getAccessToken();
+        return this.makeApiRequest({ values }, settings, accessToken);
+    }
+
+    async _updateRow(rowNumber, values) {
+        const settings = this.settings.getGoogleSheetsSettings();
+        const accessToken = await this.getAccessToken();
+        const lastCol = this.columnLetter(values.length);
+        const range = encodeURIComponent(`'${settings.sheetName}'!A${rowNumber}:${lastCol}${rowNumber}`);
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
+        return this._request('PUT', url, { values: [values] }, accessToken);
+    }
+
+    /** 1-based column number to A1 column letters (1 -> A, 27 -> AA). */
+    columnLetter(n) {
+        let letter = '';
+        while (n > 0) {
+            const rem = (n - 1) % 26;
+            letter = String.fromCharCode(65 + rem) + letter;
+            n = Math.floor((n - 1) / 26);
+        }
+        return letter || 'A';
+    }
+
+    _request(method, url, body, accessToken) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method,
+                url,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                data: body ? JSON.stringify(body) : undefined,
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        try {
+                            resolve(JSON.parse(response.responseText));
+                        } catch (e) {
+                            reject(new Error('Invalid response from Google Sheets API'));
+                        }
+                    } else {
+                        let message = 'Unknown error';
+                        try {
+                            message = JSON.parse(response.responseText).error?.message || message;
+                        } catch (e) {
+                            message = response.responseText || message;
+                        }
+                        reject(new Error(message));
+                    }
+                },
+                onerror: (error) => reject(new Error(`Network error: ${error.error}`)),
+                ontimeout: () => reject(new Error('Request timed out'))
+            });
+        });
+    }
+
+    formatDataForSheet(data) {
+        const values = this.getEffectiveOrder().map(field => {
             if (!field || field === '_empty_') return '';
             return data[field] || '';
         });

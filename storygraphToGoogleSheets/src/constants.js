@@ -18,7 +18,8 @@ export const DEFAULT_SETTINGS = {
         serviceAccountJson: '',
         spreadsheetId: '',
         sheetName: 'Books',
-        columnMapping: []
+        columnMapping: [],
+        matchField: 'link'
     }
 };
 

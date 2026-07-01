@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.1
+// @version      1.3
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send book information from StoryGraph directly to Google Sheets
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues

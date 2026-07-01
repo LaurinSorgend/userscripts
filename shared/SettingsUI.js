@@ -153,6 +153,25 @@ export default class SettingsUI {
                 display: flex; gap: 8px; z-index: 9998;
             }
             .${prefix}-floating-bar .${prefix}-btn { box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+
+            .${prefix}-merge-list { border: 1px solid #ddd; border-radius: 4px; max-height: 50vh; overflow-y: auto; }
+            .${prefix}-merge-row {
+                display: flex; gap: 15px; align-items: flex-start;
+                padding: 12px; border-bottom: 1px solid #eee;
+            }
+            .${prefix}-merge-row:last-child { border-bottom: none; }
+            .${prefix}-merge-field { width: 28%; font-weight: 600; color: #444 !important; word-break: break-word; }
+            .${prefix}-merge-values { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+            .${prefix}-merge-choice {
+                display: flex; gap: 8px; align-items: flex-start; cursor: pointer;
+                padding: 8px; border: 1px solid #ddd !important; border-radius: 4px;
+                background: #fff !important; transition: all 0.15s; word-break: break-word;
+            }
+            .${prefix}-merge-choice.selected { border-color: ${colors.primary} !important; background: #f0f9f8 !important; }
+            .${prefix}-merge-choice input { width: auto; margin-top: 3px; flex-shrink: 0; }
+            .${prefix}-merge-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #999 !important; margin-right: 6px; }
+            .${prefix}-merge-old { color: #b03030 !important; }
+            .${prefix}-merge-new { color: #1a7a1a !important; }
         `;
 
         if (typeof GM_addStyle === 'function') {
@@ -265,6 +284,11 @@ export default class SettingsUI {
                             <input type="text" id="${prefix}-sheet-name" placeholder="Enter the sheet name">
                             <div class="hint">The name of the sheet where data will be appended</div>
                         </div>
+                        <div class="${prefix}-group">
+                            <label for="${prefix}-match-field">Match Existing Rows By</label>
+                            <select id="${prefix}-match-field"></select>
+                            <div class="hint">When sending, update the existing row that shares this field's value instead of adding a duplicate. Empty incoming values never overwrite existing data.</div>
+                        </div>
                         <div id="${prefix}-error" class="${prefix}-error" style="display: none;"></div>
                         <div class="${prefix}-btn-group">
                             <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-test-load">Test & Load Columns</button>
@@ -319,6 +343,7 @@ export default class SettingsUI {
         modal.querySelector(`#${prefix}-spreadsheet-id`).value = sheetsSettings.spreadsheetId || '';
         modal.querySelector(`#${prefix}-sheet-name`).value = sheetsSettings.sheetName || defaultSheetName;
 
+        this.populateMatchField(modal, settings, extractor);
         this.populateFieldOrder(modal, settings, extractor);
         this.populateCustomFields(modal, settings);
         this.populateConstantFields(modal, settings);
@@ -343,6 +368,18 @@ export default class SettingsUI {
         }
 
         this.attachDragHandlers(fieldList);
+    }
+
+    static populateMatchField(modal, settings, extractor) {
+        const { prefix } = this.cfg;
+        const select = modal.querySelector(`#${prefix}-match-field`);
+        if (!select) return;
+
+        const allDefs = extractor.getAllFieldDefinitions();
+        select.innerHTML = Object.entries(allDefs)
+            .map(([key, def]) => `<option value="${key}">${def.label}</option>`)
+            .join('');
+        select.value = settings.getGoogleSheetsSettings().matchField || 'link';
     }
 
     static populateCustomFields(modal, settings) {
@@ -614,7 +651,9 @@ export default class SettingsUI {
                     .map(s => s.value)
                 : settings.getGoogleSheetsSettings().columnMapping || [];
 
-            settings.setGoogleSheetsSettings({ serviceAccountJson, spreadsheetId, sheetName, columnMapping });
+            const matchField = modal.querySelector(`#${prefix}-match-field`).value;
+
+            settings.setGoogleSheetsSettings({ serviceAccountJson, spreadsheetId, sheetName, columnMapping, matchField });
             this.showNotification('Settings saved!');
             modal.classList.remove('show');
         });
@@ -625,6 +664,100 @@ export default class SettingsUI {
                 this.populateSettings(modal, settings, extractor);
                 this.showNotification('Settings reset to default');
             }
+        });
+    }
+
+    static escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    /**
+     * Compare an incoming item against the existing sheet row and let the user
+     * pick which value to keep per conflicting field.
+     *
+     * @param {Array<{index:number,label:string,existing:string,incoming:string}>} diffs
+     * @returns {Promise<Object|null>} map of colIndex -> chosen value, or null if cancelled.
+     */
+    static showMergeDialog(diffs) {
+        const { prefix } = this.cfg;
+
+        return new Promise((resolve) => {
+            const modal = document.createElement('div');
+            modal.className = `${prefix}-modal show`;
+            modal.innerHTML = `
+                <div class="${prefix}-content">
+                    <div class="${prefix}-header">
+                        <div class="${prefix}-title">Row Already Exists</div>
+                        <button class="${prefix}-close">&times;</button>
+                    </div>
+                    <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+                        This item is already in your sheet. Choose which value to keep for each changed field.
+                    </p>
+                    <div class="${prefix}-btn-group" style="margin-top: 0; margin-bottom: 12px;">
+                        <button class="${prefix}-btn ${prefix}-btn-secondary ${prefix}-btn-small" data-all="existing">Keep all current</button>
+                        <button class="${prefix}-btn ${prefix}-btn-secondary ${prefix}-btn-small" data-all="incoming">Use all new</button>
+                    </div>
+                    <div class="${prefix}-merge-list">${diffs.map((d, i) => this.mergeRowHtml(d, i)).join('')}</div>
+                    <div class="${prefix}-btn-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                        <button class="${prefix}-btn ${prefix}-btn-primary" data-action="confirm">Update Row</button>
+                        <button class="${prefix}-btn ${prefix}-btn-secondary" data-action="cancel">Cancel</button>
+                    </div>
+                </div>`;
+
+            this.attachMergeHandlers(modal, diffs, resolve);
+            document.body.appendChild(modal);
+        });
+    }
+
+    static mergeRowHtml(diff, i) {
+        const { prefix } = this.cfg;
+        const empty = '<em style="color:#aaa;">(empty)</em>';
+        const choice = (which, tag, cls, value, checked) => `
+            <label class="${prefix}-merge-choice${checked ? ' selected' : ''}" data-choice="${which}">
+                <input type="radio" name="${prefix}-merge-${i}" value="${which}"${checked ? ' checked' : ''}>
+                <span><span class="${prefix}-merge-tag">${tag}</span><span class="${cls}">${this.escapeHtml(value) || empty}</span></span>
+            </label>`;
+        return `
+            <div class="${prefix}-merge-row">
+                <div class="${prefix}-merge-field">${this.escapeHtml(diff.label)}</div>
+                <div class="${prefix}-merge-values">
+                    ${choice('existing', 'Current', `${prefix}-merge-old`, diff.existing, false)}
+                    ${choice('incoming', 'New', `${prefix}-merge-new`, diff.incoming, true)}
+                </div>
+            </div>`;
+    }
+
+    static attachMergeHandlers(modal, diffs, resolve) {
+        const { prefix } = this.cfg;
+        const list = modal.querySelector(`.${prefix}-merge-list`);
+
+        list.addEventListener('change', (e) => {
+            e.target.closest(`.${prefix}-merge-values`)
+                .querySelectorAll(`.${prefix}-merge-choice`)
+                .forEach(l => l.classList.toggle('selected', l.querySelector('input').checked));
+        });
+
+        modal.querySelectorAll('[data-all]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                list.querySelectorAll(`.${prefix}-merge-choice[data-choice="${btn.dataset.all}"] input`)
+                    .forEach(input => { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })); });
+            });
+        });
+
+        const cleanup = (result) => { modal.remove(); resolve(result); };
+        modal.querySelector(`.${prefix}-close`).addEventListener('click', () => cleanup(null));
+        modal.querySelector('[data-action="cancel"]').addEventListener('click', () => cleanup(null));
+        modal.addEventListener('click', (e) => { if (e.target === modal) cleanup(null); });
+
+        modal.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+            const resolution = {};
+            diffs.forEach((diff, i) => {
+                const checked = modal.querySelector(`input[name="${prefix}-merge-${i}"]:checked`);
+                resolution[diff.index] = (checked && checked.value === 'existing') ? diff.existing : diff.incoming;
+            });
+            cleanup(resolution);
         });
     }
 }

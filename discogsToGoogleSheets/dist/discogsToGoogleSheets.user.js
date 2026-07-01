@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0
+// @version      1.1
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send album information from Discogs directly to Google Sheets
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
@@ -37,6 +37,24 @@
       }
     }
     check();
+  }
+  async function sendToSheet(sheetsManager, extractor, info, UI2, label = "Item") {
+    const defs = extractor.getAllFieldDefinitions();
+    const result = await sheetsManager.upsert(info, (diffs) => {
+      const enriched = diffs.map((d) => {
+        var _a;
+        return { ...d, label: ((_a = defs[d.key]) == null ? void 0 : _a.label) || d.key };
+      });
+      return UI2.showMergeDialog(enriched);
+    });
+    const messages = {
+      appended: `${label} sent to Google Sheets!`,
+      updated: "Existing row updated!",
+      unchanged: "Already up to date — nothing to change",
+      cancelled: "Update cancelled"
+    };
+    UI2.showNotification(messages[result.action] || messages.appended, 2500, result.action === "cancelled");
+    return result;
   }
   const SEPARATOR_OPTIONS = [
     { value: "	", label: "Tab" },
@@ -289,11 +307,144 @@
       const accessToken = await this.getAccessToken();
       return this.makeApiRequest(formattedData, sheetsSettings, accessToken);
     }
-    formatDataForSheet(data) {
+    /**
+     * Send an item to the sheet, updating an existing row when one already holds
+     * the same value in the configured match field instead of appending a
+     * duplicate. Empty incoming values never overwrite existing data.
+     *
+     * @param {Object} data Formatted field map from the extractor.
+     * @param {Function} [resolveConflicts] async (diffs) => ({ [colIndex]: value })
+     *        | null. Called with the fields that would change so a UI can let the
+     *        user choose; returning null aborts the update.
+     * @returns {Promise<{action: 'appended'|'updated'|'unchanged'|'cancelled'}>}
+     */
+    async upsert(data, resolveConflicts) {
       const sheetsSettings = this.settings.getGoogleSheetsSettings();
-      const mapping = sheetsSettings.columnMapping;
-      const order = mapping && mapping.length > 0 ? mapping : this.settings.get("fieldOrder");
-      const values = order.map((field) => {
+      if (!sheetsSettings.serviceAccountJson || !sheetsSettings.spreadsheetId || !sheetsSettings.sheetName) {
+        throw new Error("Google Sheets settings are not configured. Please open the settings modal to configure your credentials.");
+      }
+      const order = this.getEffectiveOrder();
+      const newValues = this.formatDataForSheet(data).values;
+      const matchCol = order.indexOf(this.getMatchFieldKey());
+      if (matchCol === -1 || !this.normalize(newValues[matchCol])) {
+        await this._appendRow(newValues);
+        return { action: "appended" };
+      }
+      const found = this.findExistingRow(await this.fetchRows(), matchCol, newValues[matchCol]);
+      if (!found) {
+        await this._appendRow(newValues);
+        return { action: "appended" };
+      }
+      return this._mergeAndUpdate(order, newValues, found, resolveConflicts);
+    }
+    /** Resolve conflicts (optionally via the callback) and write the merged row. */
+    async _mergeAndUpdate(order, newValues, found, resolveConflicts) {
+      const merged = order.map((key, i) => newValues[i] !== "" ? newValues[i] : found.row[i] ?? "");
+      const diffs = order.reduce((acc, key, i) => {
+        const incoming = newValues[i] ?? "";
+        const existing = found.row[i] ?? "";
+        if (incoming !== "" && incoming !== existing) acc.push({ index: i, key, existing, incoming });
+        return acc;
+      }, []);
+      if (diffs.length && typeof resolveConflicts === "function") {
+        const resolution = await resolveConflicts(diffs);
+        if (resolution === null) return { action: "cancelled" };
+        for (const idx of Object.keys(resolution)) merged[idx] = resolution[idx];
+      } else if (!diffs.length) {
+        return { action: "unchanged" };
+      }
+      await this._updateRow(found.rowNumber, merged);
+      return { action: "updated" };
+    }
+    /** Effective column order: explicit column mapping, else the field order. */
+    getEffectiveOrder() {
+      const mapping = this.settings.getGoogleSheetsSettings().columnMapping;
+      return mapping && mapping.length > 0 ? mapping : this.settings.get("fieldOrder");
+    }
+    getMatchFieldKey() {
+      return this.settings.getGoogleSheetsSettings().matchField || "link";
+    }
+    /** Loosely compare cell values (trim, lowercase, ignore trailing slash). */
+    normalize(value) {
+      return String(value ?? "").trim().toLowerCase().replace(/\/+$/, "");
+    }
+    /** All value rows of the sheet (including the header row). */
+    async fetchRows() {
+      const settings = this.settings.getGoogleSheetsSettings();
+      const accessToken = await this.getAccessToken();
+      const range = encodeURIComponent(`'${settings.sheetName}'`);
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}`;
+      const data = await this._request("GET", url, null, accessToken);
+      return data.values || [];
+    }
+    /** Find the first data row whose match column equals matchValue. */
+    findExistingRow(rows, matchCol, matchValue) {
+      const target = this.normalize(matchValue);
+      for (let i = 1; i < rows.length; i++) {
+        if (this.normalize(rows[i][matchCol]) === target) {
+          return { rowNumber: i + 1, row: rows[i] };
+        }
+      }
+      return null;
+    }
+    async _appendRow(values) {
+      const settings = this.settings.getGoogleSheetsSettings();
+      const accessToken = await this.getAccessToken();
+      return this.makeApiRequest({ values }, settings, accessToken);
+    }
+    async _updateRow(rowNumber, values) {
+      const settings = this.settings.getGoogleSheetsSettings();
+      const accessToken = await this.getAccessToken();
+      const lastCol = this.columnLetter(values.length);
+      const range = encodeURIComponent(`'${settings.sheetName}'!A${rowNumber}:${lastCol}${rowNumber}`);
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${settings.spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
+      return this._request("PUT", url, { values: [values] }, accessToken);
+    }
+    /** 1-based column number to A1 column letters (1 -> A, 27 -> AA). */
+    columnLetter(n) {
+      let letter = "";
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        letter = String.fromCharCode(65 + rem) + letter;
+        n = Math.floor((n - 1) / 26);
+      }
+      return letter || "A";
+    }
+    _request(method, url, body, accessToken) {
+      return new Promise((resolve, reject) => {
+        _GM_xmlhttpRequest({
+          method,
+          url,
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+          },
+          data: body ? JSON.stringify(body) : void 0,
+          onload: (response) => {
+            var _a;
+            if (response.status >= 200 && response.status < 300) {
+              try {
+                resolve(JSON.parse(response.responseText));
+              } catch (e) {
+                reject(new Error("Invalid response from Google Sheets API"));
+              }
+            } else {
+              let message = "Unknown error";
+              try {
+                message = ((_a = JSON.parse(response.responseText).error) == null ? void 0 : _a.message) || message;
+              } catch (e) {
+                message = response.responseText || message;
+              }
+              reject(new Error(message));
+            }
+          },
+          onerror: (error) => reject(new Error(`Network error: ${error.error}`)),
+          ontimeout: () => reject(new Error("Request timed out"))
+        });
+      });
+    }
+    formatDataForSheet(data) {
+      const values = this.getEffectiveOrder().map((field) => {
         if (!field || field === "_empty_") return "";
         return data[field] || "";
       });
@@ -486,6 +637,25 @@
                 display: flex; gap: 8px; z-index: 9998;
             }
             .${prefix}-floating-bar .${prefix}-btn { box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+
+            .${prefix}-merge-list { border: 1px solid #ddd; border-radius: 4px; max-height: 50vh; overflow-y: auto; }
+            .${prefix}-merge-row {
+                display: flex; gap: 15px; align-items: flex-start;
+                padding: 12px; border-bottom: 1px solid #eee;
+            }
+            .${prefix}-merge-row:last-child { border-bottom: none; }
+            .${prefix}-merge-field { width: 28%; font-weight: 600; color: #444 !important; word-break: break-word; }
+            .${prefix}-merge-values { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+            .${prefix}-merge-choice {
+                display: flex; gap: 8px; align-items: flex-start; cursor: pointer;
+                padding: 8px; border: 1px solid #ddd !important; border-radius: 4px;
+                background: #fff !important; transition: all 0.15s; word-break: break-word;
+            }
+            .${prefix}-merge-choice.selected { border-color: ${colors.primary} !important; background: #f0f9f8 !important; }
+            .${prefix}-merge-choice input { width: auto; margin-top: 3px; flex-shrink: 0; }
+            .${prefix}-merge-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #999 !important; margin-right: 6px; }
+            .${prefix}-merge-old { color: #b03030 !important; }
+            .${prefix}-merge-new { color: #1a7a1a !important; }
         `;
       if (typeof _GM_addStyle === "function") {
         _GM_addStyle(css);
@@ -592,6 +762,11 @@
                             <input type="text" id="${prefix}-sheet-name" placeholder="Enter the sheet name">
                             <div class="hint">The name of the sheet where data will be appended</div>
                         </div>
+                        <div class="${prefix}-group">
+                            <label for="${prefix}-match-field">Match Existing Rows By</label>
+                            <select id="${prefix}-match-field"></select>
+                            <div class="hint">When sending, update the existing row that shares this field's value instead of adding a duplicate. Empty incoming values never overwrite existing data.</div>
+                        </div>
                         <div id="${prefix}-error" class="${prefix}-error" style="display: none;"></div>
                         <div class="${prefix}-btn-group">
                             <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-test-load">Test & Load Columns</button>
@@ -640,6 +815,7 @@
       modal.querySelector(`#${prefix}-service-account`).value = sheetsSettings.serviceAccountJson || "";
       modal.querySelector(`#${prefix}-spreadsheet-id`).value = sheetsSettings.spreadsheetId || "";
       modal.querySelector(`#${prefix}-sheet-name`).value = sheetsSettings.sheetName || defaultSheetName;
+      this.populateMatchField(modal, settings, extractor);
       this.populateFieldOrder(modal, settings, extractor);
       this.populateCustomFields(modal, settings);
       this.populateConstantFields(modal, settings);
@@ -660,6 +836,14 @@
         fieldList.appendChild(item);
       }
       this.attachDragHandlers(fieldList);
+    }
+    static populateMatchField(modal, settings, extractor) {
+      const { prefix } = this.cfg;
+      const select = modal.querySelector(`#${prefix}-match-field`);
+      if (!select) return;
+      const allDefs = extractor.getAllFieldDefinitions();
+      select.innerHTML = Object.entries(allDefs).map(([key, def]) => `<option value="${key}">${def.label}</option>`).join("");
+      select.value = settings.getGoogleSheetsSettings().matchField || "link";
     }
     static populateCustomFields(modal, settings) {
       const { prefix } = this.cfg;
@@ -903,7 +1087,8 @@
         }
         const mappingSelects = modal.querySelectorAll(`.${prefix}-mapping-select`);
         const columnMapping = mappingSelects.length > 0 ? Array.from(mappingSelects).sort((a, b) => parseInt(a.dataset.index) - parseInt(b.dataset.index)).map((s) => s.value) : settings.getGoogleSheetsSettings().columnMapping || [];
-        settings.setGoogleSheetsSettings({ serviceAccountJson, spreadsheetId, sheetName, columnMapping });
+        const matchField = modal.querySelector(`#${prefix}-match-field`).value;
+        settings.setGoogleSheetsSettings({ serviceAccountJson, spreadsheetId, sheetName, columnMapping, matchField });
         this.showNotification("Settings saved!");
         modal.classList.remove("show");
       });
@@ -913,6 +1098,99 @@
           this.populateSettings(modal, settings, extractor);
           this.showNotification("Settings reset to default");
         }
+      });
+    }
+    static escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c]);
+    }
+    /**
+     * Compare an incoming item against the existing sheet row and let the user
+     * pick which value to keep per conflicting field.
+     *
+     * @param {Array<{index:number,label:string,existing:string,incoming:string}>} diffs
+     * @returns {Promise<Object|null>} map of colIndex -> chosen value, or null if cancelled.
+     */
+    static showMergeDialog(diffs) {
+      const { prefix } = this.cfg;
+      return new Promise((resolve) => {
+        const modal = document.createElement("div");
+        modal.className = `${prefix}-modal show`;
+        modal.innerHTML = `
+                <div class="${prefix}-content">
+                    <div class="${prefix}-header">
+                        <div class="${prefix}-title">Row Already Exists</div>
+                        <button class="${prefix}-close">&times;</button>
+                    </div>
+                    <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+                        This item is already in your sheet. Choose which value to keep for each changed field.
+                    </p>
+                    <div class="${prefix}-btn-group" style="margin-top: 0; margin-bottom: 12px;">
+                        <button class="${prefix}-btn ${prefix}-btn-secondary ${prefix}-btn-small" data-all="existing">Keep all current</button>
+                        <button class="${prefix}-btn ${prefix}-btn-secondary ${prefix}-btn-small" data-all="incoming">Use all new</button>
+                    </div>
+                    <div class="${prefix}-merge-list">${diffs.map((d, i) => this.mergeRowHtml(d, i)).join("")}</div>
+                    <div class="${prefix}-btn-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                        <button class="${prefix}-btn ${prefix}-btn-primary" data-action="confirm">Update Row</button>
+                        <button class="${prefix}-btn ${prefix}-btn-secondary" data-action="cancel">Cancel</button>
+                    </div>
+                </div>`;
+        this.attachMergeHandlers(modal, diffs, resolve);
+        document.body.appendChild(modal);
+      });
+    }
+    static mergeRowHtml(diff, i) {
+      const { prefix } = this.cfg;
+      const empty = '<em style="color:#aaa;">(empty)</em>';
+      const choice = (which, tag, cls, value, checked) => `
+            <label class="${prefix}-merge-choice${checked ? " selected" : ""}" data-choice="${which}">
+                <input type="radio" name="${prefix}-merge-${i}" value="${which}"${checked ? " checked" : ""}>
+                <span><span class="${prefix}-merge-tag">${tag}</span><span class="${cls}">${this.escapeHtml(value) || empty}</span></span>
+            </label>`;
+      return `
+            <div class="${prefix}-merge-row">
+                <div class="${prefix}-merge-field">${this.escapeHtml(diff.label)}</div>
+                <div class="${prefix}-merge-values">
+                    ${choice("existing", "Current", `${prefix}-merge-old`, diff.existing, false)}
+                    ${choice("incoming", "New", `${prefix}-merge-new`, diff.incoming, true)}
+                </div>
+            </div>`;
+    }
+    static attachMergeHandlers(modal, diffs, resolve) {
+      const { prefix } = this.cfg;
+      const list = modal.querySelector(`.${prefix}-merge-list`);
+      list.addEventListener("change", (e) => {
+        e.target.closest(`.${prefix}-merge-values`).querySelectorAll(`.${prefix}-merge-choice`).forEach((l) => l.classList.toggle("selected", l.querySelector("input").checked));
+      });
+      modal.querySelectorAll("[data-all]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          list.querySelectorAll(`.${prefix}-merge-choice[data-choice="${btn.dataset.all}"] input`).forEach((input) => {
+            input.checked = true;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+        });
+      });
+      const cleanup = (result) => {
+        modal.remove();
+        resolve(result);
+      };
+      modal.querySelector(`.${prefix}-close`).addEventListener("click", () => cleanup(null));
+      modal.querySelector('[data-action="cancel"]').addEventListener("click", () => cleanup(null));
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) cleanup(null);
+      });
+      modal.querySelector('[data-action="confirm"]').addEventListener("click", () => {
+        const resolution = {};
+        diffs.forEach((diff, i) => {
+          const checked = modal.querySelector(`input[name="${prefix}-merge-${i}"]:checked`);
+          resolution[diff.index] = checked && checked.value === "existing" ? diff.existing : diff.incoming;
+        });
+        cleanup(resolution);
       });
     }
   }
@@ -1020,7 +1298,8 @@
       serviceAccountJson: "",
       spreadsheetId: "",
       sheetName: "Albums",
-      columnMapping: []
+      columnMapping: [],
+      matchField: "link"
     }
   };
   function mapFormat(raw) {
@@ -1260,14 +1539,12 @@
             try {
               this.innerHTML = '<span class="d2gs-loading"></span>Sending...';
               this.disabled = true;
-              await sheetsManager.appendToSheet(info);
-              this.innerHTML = original;
-              this.disabled = false;
-              UI.showNotification("Album sent to Google Sheets!");
+              await sendToSheet(sheetsManager, extractor, info, UI, "Album");
             } catch (error) {
+              UI.showNotification(error.message, 5e3, true);
+            } finally {
               this.innerHTML = original;
               this.disabled = false;
-              UI.showNotification(error.message, 5e3, true);
             }
           }
         );

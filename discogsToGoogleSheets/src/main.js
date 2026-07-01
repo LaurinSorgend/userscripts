@@ -1,4 +1,4 @@
-import { waitForElement } from '../../shared/utils.js';
+import { waitForElement, sendToSheet } from '../../shared/utils.js';
 import SettingsManager from '../../shared/SettingsManager.js';
 import InfoExtractor from '../../shared/InfoExtractor.js';
 import GoogleSheetsManager from '../../shared/GoogleSheetsManager.js';
@@ -52,14 +52,12 @@ function initialize() {
                     try {
                         this.innerHTML = '<span class="d2gs-loading"></span>Sending...';
                         this.disabled = true;
-                        await sheetsManager.appendToSheet(info);
-                        this.innerHTML = original;
-                        this.disabled = false;
-                        UI.showNotification('Album sent to Google Sheets!');
+                        await sendToSheet(sheetsManager, extractor, info, UI, 'Album');
                     } catch (error) {
+                        UI.showNotification(error.message, 5000, true);
+                    } finally {
                         this.innerHTML = original;
                         this.disabled = false;
-                        UI.showNotification(error.message, 5000, true);
                     }
                 }
             );
