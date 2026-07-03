@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.1
+// @version      1.2
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send album information from Discogs directly to Google Sheets
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues

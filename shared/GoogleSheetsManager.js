@@ -156,8 +156,6 @@ export default class GoogleSheetsManager {
 
     /** Resolve conflicts (optionally via the callback) and write the merged row. */
     async _mergeAndUpdate(order, newValues, found, resolveConflicts) {
-        const merged = order.map((key, i) => (newValues[i] !== '' ? newValues[i] : (found.row[i] ?? '')));
-
         const diffs = order.reduce((acc, key, i) => {
             const incoming = newValues[i] ?? '';
             const existing = found.row[i] ?? '';
@@ -165,12 +163,17 @@ export default class GoogleSheetsManager {
             return acc;
         }, []);
 
-        if (diffs.length && typeof resolveConflicts === 'function') {
+        if (!diffs.length) return { action: 'unchanged' };
+
+        // null cells are skipped by the Sheets API, leaving the existing cell untouched.
+        const merged = order.map((key, i) => (newValues[i] !== '' ? newValues[i] : null));
+
+        if (typeof resolveConflicts === 'function') {
             const resolution = await resolveConflicts(diffs);
             if (resolution === null) return { action: 'cancelled' };
-            for (const idx of Object.keys(resolution)) merged[idx] = resolution[idx];
-        } else if (!diffs.length) {
-            return { action: 'unchanged' };
+            for (const idx of Object.keys(resolution)) {
+                merged[idx] = resolution[idx] === '' ? null : resolution[idx];
+            }
         }
 
         await this._updateRow(found.rowNumber, merged);

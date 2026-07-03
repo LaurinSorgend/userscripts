@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.4
+// @version      1.5
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send book information directly to Google Sheets using Googles API
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
@@ -344,19 +344,20 @@
     }
     /** Resolve conflicts (optionally via the callback) and write the merged row. */
     async _mergeAndUpdate(order, newValues, found, resolveConflicts) {
-      const merged = order.map((key, i) => newValues[i] !== "" ? newValues[i] : found.row[i] ?? "");
       const diffs = order.reduce((acc, key, i) => {
         const incoming = newValues[i] ?? "";
         const existing = found.row[i] ?? "";
         if (incoming !== "" && incoming !== existing) acc.push({ index: i, key, existing, incoming });
         return acc;
       }, []);
-      if (diffs.length && typeof resolveConflicts === "function") {
+      if (!diffs.length) return { action: "unchanged" };
+      const merged = order.map((key, i) => newValues[i] !== "" ? newValues[i] : null);
+      if (typeof resolveConflicts === "function") {
         const resolution = await resolveConflicts(diffs);
         if (resolution === null) return { action: "cancelled" };
-        for (const idx of Object.keys(resolution)) merged[idx] = resolution[idx];
-      } else if (!diffs.length) {
-        return { action: "unchanged" };
+        for (const idx of Object.keys(resolution)) {
+          merged[idx] = resolution[idx] === "" ? null : resolution[idx];
+        }
       }
       await this._updateRow(found.rowNumber, merged);
       return { action: "updated" };
