@@ -104,4 +104,13 @@ export default class SettingsManager {
         this.settings.googleSheets = { ...this.settings.googleSheets, ...settings };
         this.save();
     }
+
+    getObsidianSettings() {
+        return this.settings.obsidian || this.defaultSettings.obsidian;
+    }
+
+    setObsidianSettings(settings) {
+        this.settings.obsidian = { ...this.settings.obsidian, ...settings };
+        this.save();
+    }
 }

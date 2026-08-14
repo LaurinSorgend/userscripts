@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         Goodreads to Google Sheets
+// @name         Goodreads to Obsidian
 // @namespace    https://github.com/laurinsorgend
-// @version      1.6
+// @version      1.0
 // @author       laurin@sorgend.eu
-// @description  Adds a button to send book information directly to Google Sheets using Googles API
+// @description  Adds a button to create/update a book note in your Obsidian vault via the Local REST API plugin
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
-// @downloadURL  https://raw.githubusercontent.com/laurinsorgend/userscripts/main/goodreadsToGoogleSheets/dist/goodreadsToGoogleSheets.user.js
-// @updateURL    https://raw.githubusercontent.com/laurinsorgend/userscripts/main/goodreadsToGoogleSheets/dist/goodreadsToGoogleSheets.meta.js
+// @downloadURL  https://raw.githubusercontent.com/laurinsorgend/userscripts/main/goodreadsToObsidian/dist/goodreadsToObsidian.user.js
+// @updateURL    https://raw.githubusercontent.com/laurinsorgend/userscripts/main/goodreadsToObsidian/dist/goodreadsToObsidian.meta.js
 // @match        https://www.goodreads.com/book/show/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.9.0/jsrsasign-all-min.js
 // @grant        GM_addStyle

@@ -9,7 +9,11 @@
     "dev:discogs": "cd discogsToGoogleSheets && vite",
     "build:discogs": "cd discogsToGoogleSheets && vite build",
     "dev:storygraph": "cd storygraphToGoogleSheets && vite",
-    "build:storygraph": "cd storygraphToGoogleSheets && vite build"
+    "build:storygraph": "cd storygraphToGoogleSheets && vite build",
+    "dev:goodreads-obsidian": "cd goodreadsToObsidian && vite",
+    "build:goodreads-obsidian": "cd goodreadsToObsidian && vite build",
+    "dev:storygraph-obsidian": "cd storygraphToObsidian && vite",
+    "build:storygraph-obsidian": "cd storygraphToObsidian && vite build"
   },
   "keywords": [],
   "author": "laurin@sorgend.eu",

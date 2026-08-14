@@ -51,6 +51,25 @@ export async function sendToSheet(sheetsManager, extractor, info, UI, label = 'I
     return result;
 }
 
+/**
+ * Send a mapped frontmatter object to the vault, updating the existing note
+ * (via the merge dialog) instead of creating a duplicate, and report the
+ * outcome via the UI's notification toast. Shared by all "*ToObsidian" send
+ * buttons.
+ */
+export async function sendToObsidian(obsidianManager, fmData, UI, label = 'Item') {
+    const result = await obsidianManager.upsert(fmData, (diffs) => UI.showMergeDialog(diffs));
+
+    const messages = {
+        created: `${label} created in Obsidian!`,
+        updated: 'Existing note updated!',
+        unchanged: 'Already up to date — nothing to change',
+        cancelled: 'Update cancelled'
+    };
+    UI.showNotification(messages[result.action] || messages.created, 2500, result.action === 'cancelled');
+    return result;
+}
+
 /** Shared field-separator options for the Format tab of the settings modal. */
 export const SEPARATOR_OPTIONS = [
     { value: '\t', label: 'Tab' },

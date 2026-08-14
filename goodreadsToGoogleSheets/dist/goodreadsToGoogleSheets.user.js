@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Google Sheets
 // @namespace    https://github.com/laurinsorgend
-// @version      1.5
+// @version      1.6
 // @author       laurin@sorgend.eu
 // @description  Adds a button to send book information directly to Google Sheets using Googles API
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
@@ -148,6 +148,13 @@
     }
     setGoogleSheetsSettings(settings) {
       this.settings.googleSheets = { ...this.settings.googleSheets, ...settings };
+      this.save();
+    }
+    getObsidianSettings() {
+      return this.settings.obsidian || this.defaultSettings.obsidian;
+    }
+    setObsidianSettings(settings) {
+      this.settings.obsidian = { ...this.settings.obsidian, ...settings };
       this.save();
     }
   }
@@ -519,6 +526,10 @@
     static get p() {
       return this.CONFIG.prefix;
     }
+    /** 'sheets' (default) or 'obsidian' — picks which 3rd settings tab renders. */
+    static get backend() {
+      return this.CONFIG.backend || "sheets";
+    }
     static addStyles() {
       const { prefix, colors } = this.cfg;
       const css = `
@@ -697,8 +708,85 @@
             </div>
         `).join("");
     }
-    static createSettingsModal(settings, extractor, sheetsManager) {
-      const { prefix, modalTitle, mappingDescription } = this.cfg;
+    static sheetsTabHtml() {
+      const { prefix, mappingDescription } = this.cfg;
+      return `
+            <div class="${prefix}-section">
+                <h3>Google Sheets API Configuration</h3>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-service-account">Service Account JSON</label>
+                    <textarea id="${prefix}-service-account" rows="6" placeholder="Paste the entire Service Account JSON file content here"></textarea>
+                    <div class="hint">The JSON file you downloaded from Google Cloud Console</div>
+                </div>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-spreadsheet-id">Spreadsheet ID</label>
+                    <input type="text" id="${prefix}-spreadsheet-id" placeholder="Enter your spreadsheet ID">
+                    <div class="hint">Found in the URL: https://docs.google.com/spreadsheets/d/<span style="font-family: monospace;">SPREADSHEET_ID</span>/edit</div>
+                </div>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-sheet-name">Sheet Name</label>
+                    <input type="text" id="${prefix}-sheet-name" placeholder="Enter the sheet name">
+                    <div class="hint">The name of the sheet where data will be appended</div>
+                </div>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-match-field">Match Existing Rows By</label>
+                    <select id="${prefix}-match-field"></select>
+                    <div class="hint">When sending, update the existing row that shares this field's value instead of adding a duplicate. Empty incoming values never overwrite existing data.</div>
+                </div>
+                <div id="${prefix}-error" class="${prefix}-error" style="display: none;"></div>
+                <div class="${prefix}-btn-group">
+                    <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-test-load">Test & Load Columns</button>
+                </div>
+            </div>
+            <div id="${prefix}-mapping-section" class="${prefix}-section" style="display: none;">
+                <h3>Column Mapping</h3>
+                <p style="font-size: 13px; color: #666; margin-bottom: 15px;">${mappingDescription}</p>
+                <div id="${prefix}-mapping-container"></div>
+            </div>
+        `;
+    }
+    static obsidianTabHtml() {
+      const { prefix } = this.cfg;
+      return `
+            <div class="${prefix}-section">
+                <h3>Obsidian Local REST API</h3>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-obsidian-base-url">Base URL</label>
+                    <input type="text" id="${prefix}-obsidian-base-url" placeholder="http://127.0.0.1:27123">
+                    <div class="hint">The Local REST API plugin's server URL (Settings &rarr; Local REST API in Obsidian). Use the plain HTTP port to avoid the self-signed HTTPS certificate.</div>
+                </div>
+                <div class="${prefix}-group">
+                    <label for="${prefix}-obsidian-api-key">API Key</label>
+                    <input type="text" id="${prefix}-obsidian-api-key" placeholder="Paste the API key from the plugin settings">
+                </div>
+                <div id="${prefix}-error" class="${prefix}-error" style="display: none;"></div>
+                <div class="${prefix}-btn-group">
+                    <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-test-load">Test Connection</button>
+                </div>
+            </div>
+        `;
+    }
+    static backendHelpHtml() {
+      if (this.backend === "obsidian") return "";
+      const { prefix } = this.cfg;
+      return `
+            <div class="${prefix}-section" style="margin-top: 20px;">
+                <h3>How to Get Your Service Account</h3>
+                <ol style="font-size: 14px; color: #666; line-height: 1.6;">
+                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
+                    <li>Create a new project or select an existing one</li>
+                    <li>Enable the <strong>Google Sheets API</strong></li>
+                    <li>Go to <strong>IAM & Admin &gt; Service Accounts</strong></li>
+                    <li>Create a Service Account and create a Key (JSON)</li>
+                    <li><strong>Important:</strong> Share your spreadsheet with the service account email (client_email in the JSON)</li>
+                    <li>Copy the content of the JSON file and paste it above</li>
+                </ol>
+            </div>
+        `;
+    }
+    static createSettingsModal(settings, extractor, backendManager) {
+      const { prefix, modalTitle } = this.cfg;
+      const isObsidian = this.backend === "obsidian";
       const modal = document.createElement("div");
       modal.className = `${prefix}-modal`;
       modal.innerHTML = `
@@ -711,7 +799,7 @@
                 <div class="${prefix}-tabs">
                     <button class="${prefix}-tab active" data-tab="format">Format</button>
                     <button class="${prefix}-tab" data-tab="fields">Fields</button>
-                    <button class="${prefix}-tab" data-tab="sheets">Google Sheets</button>
+                    <button class="${prefix}-tab" data-tab="backend">${isObsidian ? this.cfg.tabLabel || "Obsidian" : "Google Sheets"}</button>
                 </div>
 
                 <div id="${prefix}-tab-format" class="${prefix}-tab-content active">
@@ -750,39 +838,8 @@
                     </div>
                 </div>
 
-                <div id="${prefix}-tab-sheets" class="${prefix}-tab-content">
-                    <div class="${prefix}-section">
-                        <h3>Google Sheets API Configuration</h3>
-                        <div class="${prefix}-group">
-                            <label for="${prefix}-service-account">Service Account JSON</label>
-                            <textarea id="${prefix}-service-account" rows="6" placeholder="Paste the entire Service Account JSON file content here"></textarea>
-                            <div class="hint">The JSON file you downloaded from Google Cloud Console</div>
-                        </div>
-                        <div class="${prefix}-group">
-                            <label for="${prefix}-spreadsheet-id">Spreadsheet ID</label>
-                            <input type="text" id="${prefix}-spreadsheet-id" placeholder="Enter your spreadsheet ID">
-                            <div class="hint">Found in the URL: https://docs.google.com/spreadsheets/d/<span style="font-family: monospace;">SPREADSHEET_ID</span>/edit</div>
-                        </div>
-                        <div class="${prefix}-group">
-                            <label for="${prefix}-sheet-name">Sheet Name</label>
-                            <input type="text" id="${prefix}-sheet-name" placeholder="Enter the sheet name">
-                            <div class="hint">The name of the sheet where data will be appended</div>
-                        </div>
-                        <div class="${prefix}-group">
-                            <label for="${prefix}-match-field">Match Existing Rows By</label>
-                            <select id="${prefix}-match-field"></select>
-                            <div class="hint">When sending, update the existing row that shares this field's value instead of adding a duplicate. Empty incoming values never overwrite existing data.</div>
-                        </div>
-                        <div id="${prefix}-error" class="${prefix}-error" style="display: none;"></div>
-                        <div class="${prefix}-btn-group">
-                            <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-test-load">Test & Load Columns</button>
-                        </div>
-                    </div>
-                    <div id="${prefix}-mapping-section" class="${prefix}-section" style="display: none;">
-                        <h3>Column Mapping</h3>
-                        <p style="font-size: 13px; color: #666; margin-bottom: 15px;">${mappingDescription}</p>
-                        <div id="${prefix}-mapping-container"></div>
-                    </div>
+                <div id="${prefix}-tab-backend" class="${prefix}-tab-content">
+                    ${isObsidian ? this.obsidianTabHtml() : this.sheetsTabHtml()}
                 </div>
 
                 <div class="${prefix}-btn-group" style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
@@ -791,23 +848,12 @@
                     <button class="${prefix}-btn ${prefix}-btn-secondary" id="${prefix}-cancel">Cancel</button>
                 </div>
 
-                <div class="${prefix}-section" style="margin-top: 20px;">
-                    <h3>How to Get Your Service Account</h3>
-                    <ol style="font-size: 14px; color: #666; line-height: 1.6;">
-                        <li>Go to <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
-                        <li>Create a new project or select an existing one</li>
-                        <li>Enable the <strong>Google Sheets API</strong></li>
-                        <li>Go to <strong>IAM & Admin &gt; Service Accounts</strong></li>
-                        <li>Create a Service Account and create a Key (JSON)</li>
-                        <li><strong>Important:</strong> Share your spreadsheet with the service account email (client_email in the JSON)</li>
-                        <li>Copy the content of the JSON file and paste it above</li>
-                    </ol>
-                </div>
+                ${this.backendHelpHtml()}
             </div>
         `;
       document.body.appendChild(modal);
       this.populateSettings(modal, settings, extractor);
-      this.attachSettingsHandlers(modal, settings, extractor, sheetsManager);
+      this.attachSettingsHandlers(modal, settings, extractor, backendManager);
       return modal;
     }
     static populateSettings(modal, settings, extractor) {
@@ -817,11 +863,17 @@
         const el = modal.querySelector(`#${prefix}-${opt.id}`);
         if (el) el.value = settings.get(opt.settingKey) ?? ((_a = opt.options[0]) == null ? void 0 : _a.value) ?? "";
       }
-      const sheetsSettings = settings.getGoogleSheetsSettings();
-      modal.querySelector(`#${prefix}-service-account`).value = sheetsSettings.serviceAccountJson || "";
-      modal.querySelector(`#${prefix}-spreadsheet-id`).value = sheetsSettings.spreadsheetId || "";
-      modal.querySelector(`#${prefix}-sheet-name`).value = sheetsSettings.sheetName || defaultSheetName;
-      this.populateMatchField(modal, settings, extractor);
+      if (this.backend === "obsidian") {
+        const obsidianSettings = settings.getObsidianSettings() || {};
+        modal.querySelector(`#${prefix}-obsidian-base-url`).value = obsidianSettings.baseUrl || "http://127.0.0.1:27123";
+        modal.querySelector(`#${prefix}-obsidian-api-key`).value = obsidianSettings.apiKey || "";
+      } else {
+        const sheetsSettings = settings.getGoogleSheetsSettings();
+        modal.querySelector(`#${prefix}-service-account`).value = sheetsSettings.serviceAccountJson || "";
+        modal.querySelector(`#${prefix}-spreadsheet-id`).value = sheetsSettings.spreadsheetId || "";
+        modal.querySelector(`#${prefix}-sheet-name`).value = sheetsSettings.sheetName || defaultSheetName;
+        this.populateMatchField(modal, settings, extractor);
+      }
       this.populateFieldOrder(modal, settings, extractor);
       this.populateCustomFields(modal, settings);
       this.populateConstantFields(modal, settings);
@@ -905,7 +957,7 @@
         return offset < 0 && offset > closest.offset ? { offset, element: child } : closest;
       }, { offset: Number.NEGATIVE_INFINITY }).element;
     }
-    static attachSettingsHandlers(modal, settings, extractor, sheetsManager) {
+    static attachSettingsHandlers(modal, settings, extractor, backendManager) {
       const { prefix } = this.cfg;
       modal.querySelector(`.${prefix}-close`).addEventListener("click", () => modal.classList.remove("show"));
       modal.querySelector(`#${prefix}-cancel`).addEventListener("click", () => modal.classList.remove("show"));
@@ -921,8 +973,43 @@
         });
       });
       this.attachFieldHandlers(modal, settings, extractor);
-      this.attachSheetsHandlers(modal, settings, extractor, sheetsManager);
+      if (this.backend === "obsidian") {
+        this.attachObsidianHandlers(modal, settings, backendManager);
+      } else {
+        this.attachSheetsHandlers(modal, settings, extractor, backendManager);
+      }
       this.attachSaveHandler(modal, settings, extractor);
+    }
+    static attachObsidianHandlers(modal, settings, obsidianManager) {
+      const { prefix } = this.cfg;
+      modal.querySelector(`#${prefix}-test-load`).addEventListener("click", async () => {
+        const baseUrl = modal.querySelector(`#${prefix}-obsidian-base-url`).value.trim();
+        const apiKey = modal.querySelector(`#${prefix}-obsidian-api-key`).value.trim();
+        const errorDiv = modal.querySelector(`#${prefix}-error`);
+        if (!baseUrl || !apiKey) {
+          errorDiv.textContent = "Please fill in both fields first";
+          errorDiv.style.display = "block";
+          return;
+        }
+        errorDiv.style.display = "none";
+        const btn = modal.querySelector(`#${prefix}-test-load`);
+        const orig = btn.textContent;
+        btn.textContent = "Connecting...";
+        btn.disabled = true;
+        try {
+          const ObsidianManagerCtor = obsidianManager.constructor;
+          const tempManager = new ObsidianManagerCtor({ getObsidianSettings: () => ({ baseUrl, apiKey }) });
+          await tempManager.testConnection();
+          this.showNotification("Connected to Obsidian!");
+        } catch (error) {
+          errorDiv.textContent = `Error: ${error.message}`;
+          errorDiv.style.display = "block";
+          this.showNotification("Connection failed", 3e3, true);
+        } finally {
+          btn.textContent = orig;
+          btn.disabled = false;
+        }
+      });
     }
     static attachFieldHandlers(modal, settings, extractor) {
       const { prefix } = this.cfg;
@@ -1078,6 +1165,18 @@
           if (field) field.value = item.querySelector(`.${prefix}-constant-value`).value;
         }
         settings.save();
+        if (this.backend === "obsidian") {
+          const baseUrl = modal.querySelector(`#${prefix}-obsidian-base-url`).value.trim();
+          const apiKey = modal.querySelector(`#${prefix}-obsidian-api-key`).value.trim();
+          if (!baseUrl || !apiKey) {
+            this.showNotification("Please fill in both Obsidian fields", 2e3, true);
+            return;
+          }
+          settings.setObsidianSettings({ baseUrl, apiKey });
+          this.showNotification("Settings saved!");
+          modal.classList.remove("show");
+          return;
+        }
         const serviceAccountJson = modal.querySelector(`#${prefix}-service-account`).value.trim();
         const spreadsheetId = modal.querySelector(`#${prefix}-spreadsheet-id`).value.trim();
         const sheetName = modal.querySelector(`#${prefix}-sheet-name`).value.trim();

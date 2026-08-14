@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         StoryGraph to Google Sheets
+// @name         StoryGraph to Obsidian
 // @namespace    https://github.com/laurinsorgend
-// @version      1.5
+// @version      1.0
 // @author       laurin@sorgend.eu
-// @description  Adds a button to send book information from StoryGraph directly to Google Sheets
+// @description  Adds a button to create/update a book note in your Obsidian vault via the Local REST API plugin
 // @supportURL   https://github.com/laurinsorgend/userscripts/issues
-// @downloadURL  https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToGoogleSheets/dist/storygraphToGoogleSheets.user.js
-// @updateURL    https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToGoogleSheets/dist/storygraphToGoogleSheets.meta.js
+// @downloadURL  https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToObsidian/dist/storygraphToObsidian.user.js
+// @updateURL    https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToObsidian/dist/storygraphToObsidian.meta.js
 // @match        https://app.thestorygraph.com/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.9.0/jsrsasign-all-min.js
 // @grant        GM_addStyle
@@ -35,22 +35,15 @@
     }
     check();
   }
-  async function sendToSheet(sheetsManager, extractor, info, UI2, label = "Item") {
-    const defs = extractor.getAllFieldDefinitions();
-    const result = await sheetsManager.upsert(info, (diffs) => {
-      const enriched = diffs.map((d) => {
-        var _a;
-        return { ...d, label: ((_a = defs[d.key]) == null ? void 0 : _a.label) || d.key };
-      });
-      return UI2.showMergeDialog(enriched);
-    });
+  async function sendToObsidian(obsidianManager, fmData, UI2, label = "Item") {
+    const result = await obsidianManager.upsert(fmData, (diffs) => UI2.showMergeDialog(diffs));
     const messages = {
-      appended: `${label} sent to Google Sheets!`,
-      updated: "Existing row updated!",
+      created: `${label} created in Obsidian!`,
+      updated: "Existing note updated!",
       unchanged: "Already up to date — nothing to change",
       cancelled: "Update cancelled"
     };
-    UI2.showNotification(messages[result.action] || messages.appended, 2500, result.action === "cancelled");
+    UI2.showNotification(messages[result.action] || messages.created, 2500, result.action === "cancelled");
     return result;
   }
   const SEPARATOR_OPTIONS = [
@@ -214,6 +207,293 @@
     /** Object keyed by field id, values already formatted (used for Sheets). */
     getFormattedData() {
       return this.format(this.extract());
+    }
+  }
+  const FIELD_LABELS = {
+    title: "Title",
+    author: "Author",
+    category: "Category",
+    pages: "Pages",
+    published: "Published",
+    country: "Country",
+    series: "Series",
+    series_index: "Series Index",
+    goodreads: "Goodreads Rating",
+    interest: "Interest",
+    date_added: "Date Added",
+    recommended_by: "Recommended By",
+    link: "Link",
+    genres: "Genres",
+    moods: "Moods",
+    pace: "Pace",
+    storygraph: "StoryGraph Polls",
+    cover_source: "Cover Source"
+  };
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const COERCED = /^(y|n|yes|no|true|false|on|off|null|~)$/i;
+  const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+  const LEADING_INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
+  function needsQuotes(s) {
+    if (s === "") return true;
+    if (/^\s|\s$/.test(s)) return true;
+    if (LEADING_INDICATOR.test(s)) return true;
+    if (/:\s|:$|\s#/.test(s)) return true;
+    if (/["\\]/.test(s)) return true;
+    if (s.includes(",")) return true;
+    if (COERCED.test(s)) return true;
+    if (NUMERIC.test(s)) return true;
+    if (ISO_DATE.test(s)) return false;
+    return false;
+  }
+  function scalar(v) {
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    const s = String(v);
+    if (!needsQuotes(s)) return s;
+    return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  function isPlainObject(v) {
+    return typeof v === "object" && v !== null && !Array.isArray(v);
+  }
+  function yamlLines(obj, depth) {
+    const pad = "  ".repeat(depth);
+    const out = [];
+    for (const [key, value] of Object.entries(obj)) {
+      if (value === null || value === void 0 || value === "") continue;
+      if (Array.isArray(value)) {
+        if (value.length === 0) continue;
+        out.push(`${pad}${key}:`);
+        for (const item of value) out.push(`${pad}  - ${scalar(item)}`);
+      } else if (isPlainObject(value)) {
+        const nested = yamlLines(value, depth + 1);
+        if (nested.length === 0) continue;
+        out.push(`${pad}${key}:`);
+        out.push(...nested);
+      } else {
+        out.push(`${pad}${key}: ${scalar(value)}`);
+      }
+    }
+    return out;
+  }
+  function sanitizeFilename(title) {
+    return title.replace(/\s*[:/]\s*/g, " - ").replace(/[\\*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim();
+  }
+  function buildTags({ category, country }) {
+    const tags = ["book"];
+    if (category) tags.push("book/" + category.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    if (country) tags.push("country/" + country.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    return tags;
+  }
+  function buildNoteContent(fmData, filename) {
+    const fields = { type: "book", title: fmData.title };
+    if (filename !== fmData.title) fields.aliases = [fmData.title];
+    Object.assign(fields, {
+      author: fmData.author,
+      category: fmData.category,
+      pages: fmData.pages,
+      published: fmData.published,
+      country: fmData.country,
+      series: fmData.series,
+      series_index: fmData.series_index,
+      goodreads: fmData.goodreads,
+      interest: fmData.interest,
+      date_added: fmData.date_added,
+      recommended_by: fmData.recommended_by,
+      link: fmData.link,
+      genres: fmData.genres,
+      moods: fmData.moods,
+      pace: fmData.pace,
+      storygraph: fmData.storygraph,
+      cover_source: fmData.cover_source,
+      tags: fmData.tags
+    });
+    const frontmatter = ["---", ...yamlLines(fields, 0), "---"].join("\n");
+    return `${frontmatter}
+
+\`\`\`button
+name Start Reading
+type command
+action Templater: Insert Start Reading
+\`\`\`
+
+## Readings
+
+\`\`\`dataview
+TABLE WITHOUT ID file.link AS "Reading", start AS "Started", end AS "Finished", rating AS "Rating", format AS "Format"
+FROM [[]] AND #reading
+SORT end DESC
+\`\`\`
+
+## Notes
+`;
+  }
+  function isEmpty(v) {
+    if (v === void 0 || v === null || v === "") return true;
+    if (Array.isArray(v)) return v.length === 0;
+    if (isPlainObject(v)) return Object.keys(v).length === 0;
+    return false;
+  }
+  function display(v) {
+    if (isEmpty(v)) return "";
+    if (Array.isArray(v)) return v.join(", ");
+    if (isPlainObject(v)) {
+      return Object.entries(v).map(([k, val]) => {
+        if (isPlainObject(val)) {
+          return `${k}: {${Object.entries(val).map(([k2, v2]) => `${k2} ${v2}%`).join(", ")}}`;
+        }
+        return `${k}: ${val}`;
+      }).join("; ");
+    }
+    return String(v);
+  }
+  class ObsidianManager {
+    constructor(settings) {
+      this.settings = settings;
+    }
+    getObsidianSettings() {
+      return this.settings.getObsidianSettings();
+    }
+    baseUrl() {
+      const { baseUrl } = this.getObsidianSettings();
+      if (!baseUrl) throw new Error("Obsidian settings are not configured. Please open the settings modal to configure the Local REST API URL and key.");
+      return baseUrl.replace(/\/+$/, "");
+    }
+    apiKey() {
+      const { apiKey } = this.getObsidianSettings();
+      if (!apiKey) throw new Error("Obsidian settings are not configured. Please open the settings modal to configure the Local REST API URL and key.");
+      return apiKey;
+    }
+    vaultUrl(path) {
+      return `${this.baseUrl()}/vault/${path.split("/").map(encodeURIComponent).join("/")}`;
+    }
+    async testConnection() {
+      return this._request("GET", `${this.baseUrl()}/`, { headers: { Accept: "application/json" } });
+    }
+    /**
+     * Create or update the book note for `fmData` (plain object keyed by vault
+     * frontmatter field names; must include `title`). Mirrors
+     * GoogleSheetsManager.upsert's contract: empty incoming values never
+     * overwrite existing data, and an optional resolveConflicts(diffs) async
+     * callback (the same shape SettingsUI.showMergeDialog expects/returns)
+     * can let the user pick a value per changed field.
+     *
+     * @returns {Promise<{action:'created'|'updated'|'unchanged'|'cancelled', path:string}>}
+     */
+    async upsert(fmData, resolveConflicts) {
+      if (!fmData || !fmData.title) throw new Error("Cannot save to Obsidian without a title.");
+      const filename = sanitizeFilename(fmData.title);
+      const path = `Books/${filename}.md`;
+      const existing = await this._getNote(path);
+      if (!existing) {
+        await this._putNote(path, buildNoteContent(fmData, filename));
+        return { action: "created", path };
+      }
+      const { diffs, real } = this._diff(fmData, existing.frontmatter || {});
+      if (!diffs.length) return { action: "unchanged", path };
+      let chosen = {};
+      for (const d of diffs) chosen[d.key] = real[d.key].incoming;
+      if (typeof resolveConflicts === "function") {
+        const resolution = await resolveConflicts(diffs);
+        if (resolution === null) return { action: "cancelled", path };
+        for (const d of diffs) {
+          const picked = resolution[d.index];
+          chosen[d.key] = picked === d.existing ? real[d.key].existing : real[d.key].incoming;
+        }
+      }
+      for (const [key, value] of Object.entries(chosen)) {
+        if (isEmpty(value)) continue;
+        await this._patchFrontmatterField(path, key, value);
+      }
+      return { action: "updated", path };
+    }
+    /** Diff incoming frontmatter fields against an existing note's parsed frontmatter. */
+    _diff(fmData, existingFm) {
+      const diffs = [];
+      const real = {};
+      for (const [key, value] of Object.entries(fmData)) {
+        if (isEmpty(value)) continue;
+        const existingVal = existingFm[key];
+        const existingDisplay = display(existingVal);
+        const incomingDisplay = display(value);
+        if (existingDisplay === incomingDisplay) continue;
+        diffs.push({ index: key, key, label: FIELD_LABELS[key] || key, existing: existingDisplay, incoming: incomingDisplay });
+        real[key] = { existing: existingVal, incoming: value };
+      }
+      return { diffs, real };
+    }
+    async _getNote(path) {
+      try {
+        return await this._request("GET", this.vaultUrl(path), {
+          headers: { Accept: "application/vnd.olrapi.note+json" }
+        });
+      } catch (err) {
+        if (err.status === 404) return null;
+        throw err;
+      }
+    }
+    async _putNote(path, content) {
+      await this._request("PUT", this.vaultUrl(path), {
+        headers: { "Content-Type": "text/markdown" },
+        data: content
+      });
+    }
+    async _patchFrontmatterField(path, key, value) {
+      await this._request("PATCH", this.vaultUrl(path), {
+        headers: {
+          "Content-Type": "application/json",
+          Operation: "replace",
+          "Target-Type": "frontmatter",
+          Target: key
+        },
+        data: JSON.stringify(value)
+      });
+    }
+    _request(method, url, { headers = {}, data } = {}) {
+      const apiKey = this.apiKey();
+      return new Promise((resolve, reject) => {
+        _GM_xmlhttpRequest({
+          method,
+          url,
+          headers: { Authorization: `Bearer ${apiKey}`, ...headers },
+          data,
+          onload: (response) => {
+            if (response.status === 404) {
+              const err2 = new Error("Not found");
+              err2.status = 404;
+              reject(err2);
+              return;
+            }
+            if (response.status >= 200 && response.status < 300) {
+              if (!response.responseText) {
+                resolve(null);
+                return;
+              }
+              try {
+                resolve(JSON.parse(response.responseText));
+              } catch (e) {
+                resolve(response.responseText);
+              }
+              return;
+            }
+            let message = response.responseText || `HTTP ${response.status}`;
+            try {
+              message = JSON.parse(response.responseText).message || message;
+            } catch (e) {
+            }
+            const err = new Error(`Obsidian API error: ${message}`);
+            err.status = response.status;
+            reject(err);
+          },
+          onerror: () => reject(new Error("Network error reaching the Obsidian Local REST API — is Obsidian running with the plugin enabled?")),
+          ontimeout: () => reject(new Error("Obsidian request timed out"))
+        });
+      });
+    }
+    validateSettings() {
+      const { baseUrl, apiKey } = this.getObsidianSettings();
+      const errors = [];
+      if (!baseUrl) errors.push("Obsidian Local REST API URL is required");
+      if (!apiKey) errors.push("Obsidian Local REST API key is required");
+      return errors;
     }
   }
   class GoogleSheetsManager {
@@ -1293,16 +1573,16 @@
   }
   __publicField(SettingsUI, "CONFIG", null);
   const CONFIG = {
-    prefix: "sg2gs",
-    modalTitle: "StoryGraph → Sheets Settings",
-    mappingDescription: "Map your Google Sheet columns to StoryGraph data fields.",
-    defaultSheetName: "Books",
+    prefix: "sg2obs",
+    modalTitle: "StoryGraph → Obsidian Settings",
+    backend: "obsidian",
+    tabLabel: "Obsidian",
     colors: { primary: "#00635d", primaryHover: "#004d47" },
     formatOptions: [
       { id: "separator", label: "Field Separator", settingKey: "separator", options: SEPARATOR_OPTIONS },
       {
         id: "dateadded-format",
-        label: "Date Added Format",
+        label: "Date Added Format (copy button only)",
         settingKey: "dateAddedFormat",
         options: [
           { value: "full", label: "UK Format" },
@@ -1312,39 +1592,39 @@
       },
       {
         id: "review-format",
-        label: "Community Review Format",
+        label: "Community Review Format (copy button only)",
         settingKey: "communityReviewFormat",
         options: [
           { value: "full", label: "Full breakdown (38% Fast 53% Medium 7% Slow)" },
           { value: "majority", label: "Majority only (Medium)" }
         ],
-        hint: "Majority only returns the dominant label when it exceeds 50%"
+        hint: "Majority only returns the dominant label when it exceeds 50%. The Obsidian note always gets the full percent breakdown."
       }
     ]
   };
   class UI extends SettingsUI {
     /**
-     * Injects "Send to Sheets" and settings buttons below the StoryGraph book cover.
+     * Injects "Send to Obsidian" and settings buttons below the StoryGraph book cover.
      */
-    static addButtons(onSettings, onSendToSheets) {
-      if (document.querySelector("[data-sg2gs-btns]")) return;
+    static addButtons(onSettings, onSendToObsidian) {
+      if (document.querySelector("[data-sg2obs-btns]")) return;
       const cover = document.querySelector(".book-cover");
       if (!cover) return;
       const parent = cover.parentElement;
       if (!parent) return;
       const BTN = "text-[13px] inline-flex items-center gap-2 px-4 py-3 bg-lightGrey dark:bg-[#3B3B3B] border border-midGrey dark:border-darkerGrey rounded-md text-blackish dark:text-white font-semibold hover:bg-darkGrey dark:hover:bg-darkerGrey cursor-pointer";
       const group = document.createElement("div");
-      group.setAttribute("data-sg2gs-btns", "");
+      group.setAttribute("data-sg2obs-btns", "");
       group.className = "flex gap-2 mt-2";
-      const sheetsBtn = document.createElement("button");
-      sheetsBtn.className = `flex-1 ${BTN}`;
-      sheetsBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 shrink-0">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 1.5v-1.5m0 0c0-.621.504-1.125 1.125-1.125m1.125 2.625h7.5" />
+      const sendBtn = document.createElement("button");
+      sendBtn.className = `flex-1 ${BTN}`;
+      sendBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 shrink-0">
+                <path d="M14.9 3.5c-2.5-1.4-5.4-1.2-7.5.5-2.6 2-3.6 5.6-2.4 8.7.3.8.1 1.7-.5 2.3l-1 1c-1 1-1.1 2.6-.1 3.6.6.6 1.4.9 2.2.8l1.6-.2c.7-.1 1.4.2 1.9.7 2.3 2.3 6 2.6 8.6.6 2.9-2.2 3.8-6.2 2.1-9.4-.3-.6-.3-1.3.1-1.9 1.2-1.9 1-4.5-.6-6.1-1.1-1.1-2.7-1.6-4.4-1.6z"/>
             </svg>
-            Send to Sheets`;
-      sheetsBtn.addEventListener("click", function() {
-        onSendToSheets.call(this);
+            Send to Obsidian`;
+      sendBtn.addEventListener("click", function() {
+        onSendToObsidian.call(this);
       });
       const settingsBtn = document.createElement("button");
       settingsBtn.className = `justify-center ${BTN}`;
@@ -1354,7 +1634,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>`;
       settingsBtn.addEventListener("click", onSettings);
-      group.appendChild(sheetsBtn);
+      group.appendChild(sendBtn);
       group.appendChild(settingsBtn);
       parent.appendChild(group);
     }
@@ -1423,12 +1703,9 @@
     separator: "	",
     dateAddedFormat: "iso",
     communityReviewFormat: "full",
-    googleSheets: {
-      serviceAccountJson: "",
-      spreadsheetId: "",
-      sheetName: "Books",
-      columnMapping: [],
-      matchField: "link"
+    obsidian: {
+      baseUrl: "http://127.0.0.1:27123",
+      apiKey: ""
     }
   };
   function getAuthors() {
@@ -1601,32 +1878,100 @@
       format: (value) => value
     }
   };
+  function flipAuthorName(name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length < 2) return name;
+    const last = parts.pop();
+    return `${last}, ${parts.join(" ")}`;
+  }
+  function formatAuthors(raw) {
+    if (!raw) return "";
+    return raw.split(",").map((n) => n.trim()).filter(Boolean).map(flipAuthorName).join(" & ");
+  }
+  function parseStorygraphDate(text) {
+    if (!text) return "";
+    const d = new Date(text);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().split("T")[0];
+  }
+  function normalizePollLabel(label) {
+    const l = label.toLowerCase();
+    if (l.includes("n/a") || /^na$/.test(l)) return "na";
+    if (l === "fast" || l === "medium" || l === "slow") return l;
+    if (l === "positive" || l === "complicated" || l === "negative") return l;
+    if (l.includes("mix")) return "mix";
+    if (l.includes("character") && !l.includes("plot")) return "character";
+    if (l.includes("plot") && !l.includes("character")) return "plot";
+    return l.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+  function normalizePoll(raw) {
+    if (!raw) return null;
+    const out = {};
+    for (const [label, pct] of Object.entries(raw)) out[normalizePollLabel(label)] = pct;
+    return out;
+  }
+  function toFrontmatterFields(rawData) {
+    const pages = rawData.pages ? parseInt(rawData.pages, 10) : null;
+    const seriesIndex = parseFloat(rawData.seriesNumber);
+    const genres = (rawData.genres || "").split(",").map((g) => g.trim().toLowerCase()).filter(Boolean);
+    const moods = (rawData.moods || "").split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
+    const storygraph = {};
+    const plotVsCharacter = normalizePoll(rawData.plotVsCharacter);
+    if (plotVsCharacter) storygraph.plot_vs_character = plotVsCharacter;
+    const pollMap = {
+      strong_character_development: rawData.strongCharDev,
+      loveable_characters: rawData.loveableChars,
+      diverse_cast: rawData.diverseCast,
+      flaws_as_focus: rawData.flawsAsFocus
+    };
+    for (const [key, raw] of Object.entries(pollMap)) {
+      const normalized = normalizePoll(raw);
+      if (normalized) storygraph[key] = normalized;
+    }
+    return {
+      title: rawData.title || "",
+      author: formatAuthors(rawData.author),
+      category: rawData.type || "",
+      pages: Number.isFinite(pages) ? pages : "",
+      published: parseStorygraphDate(rawData.pubDate),
+      link: rawData.link || "",
+      series: rawData.seriesName || "",
+      series_index: Number.isFinite(seriesIndex) ? seriesIndex : "",
+      date_added: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      genres,
+      moods,
+      pace: normalizePoll(rawData.pace) || "",
+      storygraph: Object.keys(storygraph).length ? storygraph : "",
+      cover_source: rawData.coverUrl || "",
+      tags: buildTags({ category: rawData.type })
+    };
+  }
   function initialize() {
-    const settings = new SettingsManager({ storageKey: "sg2gs_settings", defaultSettings: DEFAULT_SETTINGS });
+    const settings = new SettingsManager({ storageKey: "sg2obs_settings", defaultSettings: DEFAULT_SETTINGS });
     const extractor = new InfoExtractor(settings, { fieldDefinitions: FIELD_DEFINITIONS, debug: DEBUG });
-    const sheetsManager = new GoogleSheetsManager(settings);
+    const obsidianManager = new ObsidianManager(settings);
     let settingsModal = null;
     UI.addStyles();
     const openSettings = () => {
       if (!settingsModal) {
-        settingsModal = UI.createSettingsModal(settings, extractor, sheetsManager);
+        settingsModal = UI.createSettingsModal(settings, extractor, obsidianManager);
       }
       settingsModal.classList.add("show");
     };
-    const sendToSheets = async function() {
-      const sheetsSettings = settings.getGoogleSheetsSettings();
-      if (!sheetsSettings.serviceAccountJson || !sheetsSettings.spreadsheetId || !sheetsSettings.sheetName) {
-        UI.showNotification("Please configure Google Sheets settings first", 3e3, true);
+    const sendToObsidianHandler = async function() {
+      const obsidianSettings = settings.getObsidianSettings();
+      if (!obsidianSettings.baseUrl || !obsidianSettings.apiKey) {
+        UI.showNotification("Please configure Obsidian settings first", 3e3, true);
         openSettings();
         return;
       }
-      const info = extractor.getFormattedData();
+      const fmData = toFrontmatterFields(extractor.extract());
       const label = this.querySelector("svg") ? this.lastChild : this;
       const original = label.textContent;
       try {
         label.textContent = " Sending...";
         this.disabled = true;
-        await sendToSheet(sheetsManager, extractor, info, UI, "Book");
+        await sendToObsidian(obsidianManager, fmData, UI, "Book note");
       } catch (error) {
         UI.showNotification(error.message, 5e3, true);
       } finally {
@@ -1635,7 +1980,7 @@
       }
     };
     waitForElement(".book-title-author-and-series", () => {
-      setTimeout(() => UI.addButtons(openSettings, sendToSheets), 500);
+      setTimeout(() => UI.addButtons(openSettings, sendToObsidianHandler), 500);
     });
   }
   function hookSpaNavigation(callback) {

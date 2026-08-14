@@ -3,7 +3,7 @@ import monkey from 'vite-plugin-monkey';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-const userscriptName = 'discogsToGoogleSheets';
+const userscriptName = 'storygraphToObsidian';
 
 function generateMetaJs() {
   return {
@@ -38,17 +38,12 @@ export default defineConfig({
     monkey({
       entry: 'src/main.js',
       userscript: {
-        name: 'Discogs to Google Sheets',
+        name: 'StoryGraph to Obsidian',
         namespace: 'https://github.com/laurinsorgend',
-        version: '1.3',
-        description: 'Adds a button to send album information from Discogs directly to Google Sheets',
+        version: '1.0',
+        description: 'Adds a button to create/update a book note in your Obsidian vault via the Local REST API plugin',
         author: 'laurin@sorgend.eu',
-        match: [
-          'https://www.discogs.com/release/*',
-          'https://www.discogs.com/*/release/*',
-          'https://www.discogs.com/master/*',
-          'https://www.discogs.com/*/master/*'
-        ],
+        match: ['https://app.thestorygraph.com/*'],
         grant: [
           'GM_xmlhttpRequest',
           'GM_getValue',
@@ -56,12 +51,16 @@ export default defineConfig({
           'GM_addStyle',
           'GM_info'
         ],
-        updateURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/discogsToGoogleSheets/dist/${userscriptName}.meta.js`,
-        downloadURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/discogsToGoogleSheets/dist/${userscriptName}.user.js`,
+        updateURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToObsidian/dist/${userscriptName}.meta.js`,
+        downloadURL: `https://raw.githubusercontent.com/laurinsorgend/userscripts/main/storygraphToObsidian/dist/${userscriptName}.user.js`,
         supportURL: 'https://github.com/laurinsorgend/userscripts/issues',
         'run-at': 'document-idle'
       },
       build: {
+        // shared/SettingsUI.js still imports GoogleSheetsManager.js (for the
+        // Sheets-backend scripts' Test & Load Columns button), which pulls in
+        // jsrsasign transitively even though this script never uses it —
+        // externalize it to a CDN global instead of bundling ~500KB of crypto.
         externalGlobals: {
           jsrsasign: ['KJUR', 'https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.9.0/jsrsasign-all-min.js'],
         },
