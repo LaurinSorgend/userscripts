@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.2
+// @version      1.0.3
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -150,7 +150,7 @@
     baseURL: "",
     username: "",
     password: "",
-    /** Fields no book page knows, sent with every import unless left empty. */
+    /** What the per-book panel opens on; no book page knows these. */
     interest: "",
     ownedPhysically: false,
     onAudiobookshelf: false,
@@ -190,20 +190,21 @@
       return String(this.values.baseURL || "").trim().replace(/\/+$/, "");
     }
     /**
-     * The fields the friend fills in once rather than per book. An empty one is
-     * left out so the import does not overwrite what is on the shelf with a
-     * blank, and the two flags are only sent when they are on for the same
-     * reason: `false` would mean "they do not own it", which is a claim this
-     * script is in no position to make about every book.
+     * The fields the friend fills in once rather than per book. Interest and
+     * the two flags are not among them: they are asked per book in
+     * `ui/details.js`, which opens on `askedDefaults()`.
      */
     bookDefaults() {
-      const defaults = {};
-      if (this.values.interest !== "") defaults.interest = Number(this.values.interest);
-      if (this.values.ownedPhysically) defaults.ownedPhysically = true;
-      if (this.values.onAudiobookshelf) defaults.onAudiobookshelf = true;
       const names = String(this.values.recommendedBy || "").split(",").map((name) => name.trim()).filter(Boolean);
-      if (names.length) defaults.recommendedBy = names;
-      return defaults;
+      return names.length ? { recommendedBy: names } : {};
+    }
+    /** What the per-book panel opens on: the answers given most often. */
+    askedDefaults() {
+      return {
+        interest: this.values.interest,
+        ownedPhysically: Boolean(this.values.ownedPhysically),
+        onAudiobookshelf: Boolean(this.values.onAudiobookshelf)
+      };
     }
   }
   class ReadingTracker {
@@ -315,9 +316,11 @@
     backdrop.classList.add("bt-backdrop--shown");
     return { close, onClose: (handler) => backdrop.addEventListener("bt-closed", handler) };
   }
-  function field({ label, value, type = "text", hint, onInput }) {
+  function field({ label, value, type = "text", hint, min, max, onInput }) {
     const wrapper = el("div", "bt-field");
     const input = el("input", null, { type, value: value ?? "" });
+    if (min !== void 0) input.min = String(min);
+    if (max !== void 0) input.max = String(max);
     wrapper.append(el("label", null, { textContent: label }), input);
     if (hint) wrapper.append(el("div", "bt-hint", { textContent: hint }));
     input.addEventListener("input", () => onInput(input.value));
@@ -331,6 +334,78 @@
     input.addEventListener("change", () => onChange(input.checked));
     wrapper.append(input, caption);
     return wrapper;
+  }
+  const SCALE = 10;
+  function askBookDetails({ title, defaults }) {
+    return new Promise((resolve) => {
+      const state = { ...defaults };
+      const body = el("div");
+      body.append(
+        el("p", null, { textContent: `How much do you want to read ${title || "this book"}, and have you got it?` }),
+        ...detailFields(state)
+      );
+      let answered = false;
+      const answer = (value) => {
+        answered = true;
+        resolve(value);
+      };
+      const { onClose } = panel({
+        title: "Before it goes on your shelf",
+        body,
+        footer: [
+          { label: "Cancel", quiet: true, onClick: () => answer(null) },
+          { label: "Send", onClick: () => answer(detailsToFields(state)) }
+        ]
+      });
+      onClose(() => {
+        if (!answered) answer(null);
+      });
+    });
+  }
+  function detailFields(state) {
+    return [
+      field({
+        label: "Interest",
+        type: "number",
+        min: 1,
+        max: SCALE,
+        value: state.interest,
+        hint: `1 to ${SCALE}, which the up next score reads. Leave empty to keep what the shelf holds.`,
+        onInput: (value) => {
+          state.interest = value;
+        }
+      }),
+      checkbox({
+        label: "I own a copy",
+        checked: state.ownedPhysically,
+        onChange: (value) => {
+          state.ownedPhysically = value;
+        }
+      }),
+      checkbox({
+        label: "It is on Audiobookshelf",
+        checked: state.onAudiobookshelf,
+        onChange: (value) => {
+          state.onAudiobookshelf = value;
+        }
+      })
+    ];
+  }
+  function detailsToFields({ interest, ownedPhysically, onAudiobookshelf }) {
+    const fields = {
+      ownedPhysically: Boolean(ownedPhysically),
+      onAudiobookshelf: Boolean(onAudiobookshelf)
+    };
+    const score = interestScore(interest);
+    if (score !== null) fields.interest = score;
+    return fields;
+  }
+  function interestScore(value) {
+    const text2 = String(value ?? "").trim();
+    if (!text2) return null;
+    const score = Number(text2);
+    if (!Number.isFinite(score)) return null;
+    return Math.min(SCALE, Math.max(1, Math.round(score)));
   }
   function askWhatToKeep(changes) {
     return new Promise((resolve) => {
@@ -398,6 +473,8 @@
       el("p", null, { textContent: "Books are filed under the friend these credentials belong to." }),
       ...connectionFields(settings2),
       testRow(tracker2),
+      el("h2", null, { textContent: "What the per-book panel opens on" }),
+      ...askedFields(settings2),
       el("h2", null, { textContent: "Sent with every book" }),
       ...defaultFields(settings2)
     );
@@ -445,30 +522,36 @@
     wrapper.append(test);
     return wrapper;
   }
-  function defaultFields(settings2) {
+  function askedFields(settings2) {
     return [
       field({
         label: "Interest",
         type: "number",
+        min: 1,
+        max: 10,
         value: settings2.get("interest"),
-        hint: "How much you want to read it, which the up next score reads. Leave empty to skip.",
+        hint: "1 to 10, how much you want to read it. Leave empty and the panel starts empty.",
         onInput: (value) => settings2.set("interest", value)
       }),
+      checkbox({
+        label: "Owned by default",
+        checked: settings2.get("ownedPhysically"),
+        onChange: (value) => settings2.set("ownedPhysically", value)
+      }),
+      checkbox({
+        label: "On Audiobookshelf by default",
+        checked: settings2.get("onAudiobookshelf"),
+        onChange: (value) => settings2.set("onAudiobookshelf", value)
+      })
+    ];
+  }
+  function defaultFields(settings2) {
+    return [
       field({
         label: "Recommended by",
         value: settings2.get("recommendedBy"),
         hint: "Names, separated by commas.",
         onInput: (value) => settings2.set("recommendedBy", value)
-      }),
-      checkbox({
-        label: "Mark as owned",
-        checked: settings2.get("ownedPhysically"),
-        onChange: (value) => settings2.set("ownedPhysically", value)
-      }),
-      checkbox({
-        label: "Mark as on Audiobookshelf",
-        checked: settings2.get("onAudiobookshelf"),
-        onChange: (value) => settings2.set("onAudiobookshelf", value)
       }),
       checkbox({
         label: "Ask before overwriting a book that is already on the shelf",
@@ -483,7 +566,13 @@
       openSettings(settings2, tracker2);
       return;
     }
-    const preview = await tracker2.importBook(book, { dryRun: true });
+    const details = await askBookDetails({ title: book.title, defaults: settings2.askedDefaults() });
+    if (!details) {
+      toast("Nothing sent");
+      return;
+    }
+    const sending = { ...book, ...details };
+    const preview = await tracker2.importBook(sending, { dryRun: true });
     if (preview.action === "unchanged") {
       toast("Already up to date", { link: linkTo(settings2, preview.book_ID) });
       return;
@@ -493,7 +582,7 @@
       toast("Nothing sent");
       return;
     }
-    report(await tracker2.importBook(book, { fields }), settings2);
+    report(await tracker2.importBook(sending, { fields }), settings2);
   }
   async function fieldsToWrite(preview, settings2) {
     if (preview.action !== "updated" || !settings2.get("confirmOverwrites")) return void 0;
