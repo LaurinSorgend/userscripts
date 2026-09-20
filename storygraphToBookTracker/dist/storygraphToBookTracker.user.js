@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.3
+// @version      1.0.4
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -572,6 +572,7 @@
       return;
     }
     const sending = { ...book, ...details };
+    console.info("[Reading Tracker] sending", sending);
     const preview = await tracker2.importBook(sending, { dryRun: true });
     if (preview.action === "unchanged") {
       toast("Already up to date", { link: linkTo(settings2, preview.book_ID) });
