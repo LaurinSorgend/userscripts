@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.4
+// @version      1.0.5
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -207,14 +207,67 @@
       };
     }
   }
+  const MIN_RATING = 1;
+  const MAX_RATING = 10;
+  const HINTS = {
+    finishNoDate: "Pick the day you finished.",
+    finishFuture: "That date is in the future.",
+    finishBeforeStart: "Finished before it started — check the dates.",
+    finishBadRating: `Rating must be ${MIN_RATING} to ${MAX_RATING}, or left empty.`,
+    finishBadPercentage: "Stopped-at must be 0 to 100."
+  };
+  function todayISO(now) {
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-${day}`;
+  }
+  function numberOf(value) {
+    if (value === null || value === void 0 || typeof value === "string" && value.trim() === "") {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function isRating(value) {
+    const number = numberOf(value);
+    return number !== null && number >= MIN_RATING && number <= MAX_RATING;
+  }
+  function isRated(value) {
+    const number = numberOf(value);
+    return value !== null && value !== void 0 && String(value).trim() !== "" && number !== 0;
+  }
+  function isPercentage(value) {
+    const number = numberOf(value);
+    return number !== null && number >= 0 && number <= 100;
+  }
+  function finishProblem(input, startedOn, today) {
+    if (!input.finishedOn) return "finishNoDate";
+    if (input.finishedOn > today) return "finishFuture";
+    if (startedOn && input.finishedOn < startedOn) return "finishBeforeStart";
+    if (isRated(input.rating) && !isRating(input.rating)) return "finishBadRating";
+    if (input.didNotFinish && !isPercentage(input.stoppedAt)) return "finishBadPercentage";
+    return null;
+  }
+  function finishPatch(input) {
+    return {
+      finishedOn: input.finishedOn,
+      personalRating: isRated(input.rating) ? String(numberOf(input.rating)) : null,
+      asAudiobook: Boolean(input.asAudiobook),
+      didNotFinish: Boolean(input.didNotFinish),
+      didNotFinishAtPercentage: input.didNotFinish && String(input.stoppedAt ?? "").trim() !== "" ? String(input.stoppedAt) : null
+    };
+  }
   class ReadingTracker {
     constructor(settings2) {
       this.settings = settings2;
     }
     /** Who the tracker thinks is calling, which is who the books get filed under. */
     async me() {
-      const { id } = await this.request("GET", "/me()");
-      return id;
+      if (!this.userId) {
+        const { id } = await this.request("GET", "/me()");
+        this.userId = id;
+      }
+      return this.userId;
     }
     /**
      * Sends a scraped book.
@@ -224,6 +277,45 @@
      */
     importBook(book, { dryRun = false } = {}) {
       return this.request("POST", "/importBook", { book, dryRun });
+    }
+    /**
+     * The book behind a scraped page as the shelf knows it, asked the same
+     * way an import would: by dry run, so the matching rules stay on the
+     * server. `onShelf` is false for a book that would be created — the dry
+     * run reports `created` with no id rather than writing one.
+     *
+     * @returns {Promise<{onShelf: boolean, book_ID: string|null}>}
+     */
+    async findShelfBook(book) {
+      const { action, book_ID } = await this.importBook(book, { dryRun: true });
+      return { onShelf: action !== "created" && Boolean(book_ID), book_ID: book_ID ?? null };
+    }
+    /**
+     * The friend's open session on a book, if there is one. The service is
+     * read-all, so without the owner filter someone else's running session
+     * would answer and the button would offer to close a book you never
+     * started.
+     *
+     * @returns {Promise<{ID: string, startedOn: string|null, asAudiobook: boolean}|null>}
+     */
+    async openSession(bookId, ownerId) {
+      const owner = String(ownerId).replace(/'/g, "''");
+      const filter = `book_ID eq ${bookId} and finishedOn eq null and owner_ID eq '${owner}'`;
+      const path = `/ReadingSessions?$filter=${encodeURIComponent(filter)}&$select=ID,startedOn,asAudiobook&$top=1`;
+      const { value } = await this.request("GET", path);
+      return value?.[0] ?? null;
+    }
+    /** Opens a session dated today. The owner is stamped by the server. */
+    startSession(bookId) {
+      return this.request("POST", "/ReadingSessions", {
+        book_ID: bookId,
+        startedOn: todayISO(/* @__PURE__ */ new Date()),
+        asAudiobook: false
+      });
+    }
+    /** Closes a session with a `finishPatch`-shaped body. */
+    patchSession(id, patch) {
+      return this.request("PATCH", `/ReadingSessions(${id})`, patch);
     }
     get service() {
       return `${this.settings.origin()}/odata/v4/reading`;
@@ -615,24 +707,191 @@
       } finally {
         element.disabled = false;
         element.textContent = label;
+        context.onDone?.();
       }
     });
+  }
+  function askFinished({ startedOn, asAudiobook }) {
+    return new Promise((resolve) => {
+      const state = {
+        finishedOn: todayISO(/* @__PURE__ */ new Date()),
+        rating: "",
+        didNotFinish: false,
+        stoppedAt: ""
+      };
+      const body = el("div");
+      const hint = el("div", "bt-hint", { textContent: "" });
+      const stoppedField = field({
+        label: "Stopped at (%)",
+        type: "number",
+        min: 0,
+        max: 100,
+        value: state.stoppedAt,
+        onInput: (value) => {
+          state.stoppedAt = value;
+        }
+      });
+      stoppedField.hidden = true;
+      body.append(
+        el("p", null, { textContent: "How did this reading end?" }),
+        ...finishFields(state, () => {
+          stoppedField.hidden = !state.didNotFinish;
+        }),
+        stoppedField,
+        hint
+      );
+      let answered = false;
+      const answer = (value) => {
+        answered = true;
+        resolve(value);
+      };
+      const { onClose } = panel({
+        title: "Finish reading",
+        body,
+        footer: [
+          { label: "Cancel", quiet: true, onClick: () => answer(null) },
+          {
+            label: "Finish",
+            onClick: () => {
+              const problem = finishProblem(state, startedOn, todayISO(/* @__PURE__ */ new Date()));
+              if (problem) {
+                hint.textContent = HINTS[problem];
+                return false;
+              }
+              answer(finishPatch({ ...state, asAudiobook }));
+              return void 0;
+            }
+          }
+        ]
+      });
+      onClose(() => {
+        if (!answered) answer(null);
+      });
+    });
+  }
+  function finishFields(state, onDnfChange) {
+    return [
+      field({
+        label: "Finished on",
+        type: "date",
+        value: state.finishedOn,
+        onInput: (value) => {
+          state.finishedOn = value;
+        }
+      }),
+      field({
+        label: "Rating",
+        type: "number",
+        min: 1,
+        max: 10,
+        value: state.rating,
+        hint: "1 to 10. Leave empty for no rating.",
+        onInput: (value) => {
+          state.rating = value;
+        }
+      }),
+      checkbox({
+        label: "Did not finish",
+        checked: state.didNotFinish,
+        onChange: (value) => {
+          state.didNotFinish = value;
+          onDnfChange();
+        }
+      })
+    ];
+  }
+  function createSessionControls({ tracker: tracker2, settings: settings2, getBook }) {
+    const button2 = el("button", "bt-button", { type: "button", hidden: true });
+    let state = null;
+    let pass = 0;
+    button2.addEventListener("click", () => {
+      if (!state) return;
+      if (state.session) finishReading();
+      else startReading();
+    });
+    async function refresh() {
+      const mine = ++pass;
+      button2.hidden = true;
+      state = null;
+      if (!settings2.isConfigured()) return;
+      try {
+        const next = await resolveState(tracker2, settings2, getBook);
+        if (mine !== pass || !button2.isConnected) return;
+        state = next;
+        showButton(button2, next);
+      } catch (error) {
+        if (mine !== pass || !button2.isConnected) return;
+        toast(error.message, { error: true, ms: 6e3 });
+      }
+    }
+    async function startReading() {
+      await run(button2, async () => {
+        await tracker2.startSession(state.book_ID);
+        toast("Reading started", { link: shelfLink(settings2) });
+      }, refresh);
+    }
+    async function finishReading() {
+      const session = state.session;
+      const patch = await askFinished(session);
+      if (!patch) return;
+      await run(button2, async () => {
+        await tracker2.patchSession(session.ID, patch);
+        const message = patch.didNotFinish ? "Marked as did not finish" : "Finished";
+        toast(message, { link: shelfLink(settings2) });
+      }, refresh);
+    }
+    return { element: button2, refresh };
+  }
+  async function resolveState(tracker2, settings2, getBook) {
+    const book = getBook();
+    if (!book?.title) return null;
+    const shelf = await tracker2.findShelfBook(book);
+    if (!shelf.onShelf) return null;
+    const session = await tracker2.openSession(shelf.book_ID, await tracker2.me());
+    return { book_ID: shelf.book_ID, session };
+  }
+  function showButton(button2, state) {
+    if (!state) return;
+    button2.textContent = state.session ? "Finish reading" : "Start reading";
+    button2.hidden = false;
+  }
+  async function run(button2, action, after) {
+    if (button2.disabled) return;
+    const label = button2.textContent;
+    button2.disabled = true;
+    button2.textContent = "Working…";
+    try {
+      await action();
+    } catch (error) {
+      toast(error.message, { error: true, ms: 6e3 });
+    } finally {
+      button2.disabled = false;
+      button2.textContent = label;
+    }
+    await after();
+  }
+  function shelfLink(settings2) {
+    return { href: `${settings2.origin()}/#/list/Books`, label: "Open shelf" };
   }
   const CSS = `
 .bt-button {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 14px; border: 0; border-radius: 999px;
-    font: inherit; font-size: 14px; font-weight: 600; line-height: 1.2;
-    color: #fff; background: #3d5a80; cursor: pointer;
+    min-height: 24px;
+    padding: 8px 14px; border: 1px solid transparent; border-radius: 0;
+    font: inherit; font-size: 0.875rem; font-weight: 600; line-height: 1.25;
+    color: #eff1f5; background: #8839ef; cursor: pointer;
 }
-.bt-button:hover { background: #2f4763; }
-.bt-button[disabled] { opacity: .6; cursor: default; }
-.bt-button--quiet { color: #3d5a80; background: #e3e9f2; }
-.bt-button--quiet:hover { background: #d2dced; }
+.bt-button:hover { filter: brightness(.9); }
+.bt-button:focus-visible { outline: 2px solid #1e66f5; outline-offset: 2px; }
+.bt-button[disabled] { opacity: .65; cursor: default; filter: none; }
+.bt-button--quiet {
+    color: #4c4f69; background: #ccd0da; border-color: #9ca0b0;
+}
+.bt-button--quiet:hover { filter: brightness(.9); }
 
 .bt-spinner {
-    width: 12px; height: 12px; border-radius: 50%;
-    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    width: 12px; height: 12px; border-radius: 0;
+    border: 2px solid rgba(239,241,245,.4); border-top-color: #eff1f5;
     animation: bt-spin .7s linear infinite;
 }
 @keyframes bt-spin { to { transform: rotate(360deg); } }
@@ -671,7 +930,7 @@
 
 .bt-field { margin-bottom: 14px; }
 .bt-field label { display: block; margin-bottom: 4px; font-weight: 600; }
-.bt-field input[type=text], .bt-field input[type=password], .bt-field input[type=number] {
+.bt-field input[type=text], .bt-field input[type=password], .bt-field input[type=number], .bt-field input[type=date] {
     width: 100%; box-sizing: border-box; padding: 8px 10px;
     border: 1px solid #c6ced9; border-radius: 6px; font: inherit; background: #fff; color: inherit;
 }
@@ -763,12 +1022,15 @@
     if (!header2) return;
     const actions = el("div", "bt-actions");
     actions.style.cssText = "display:flex; gap:8px; margin:12px 0;";
+    const getBook = () => ({ ...scrape(FIELDS), ...settings.bookDefaults() });
+    const sessions = createSessionControls({ tracker, settings, getBook });
     const send = el("button", "bt-button", { type: "button", textContent: "Add to Reading Tracker" });
     const configure = el("button", "bt-button bt-button--quiet", { type: "button", textContent: "Settings" });
-    wireButton(send, () => ({ ...scrape(FIELDS), ...settings.bookDefaults() }), { tracker, settings });
+    wireButton(send, getBook, { tracker, settings, onDone: () => sessions.refresh() });
     configure.addEventListener("click", () => openSettings(settings, tracker));
-    actions.append(send, configure);
+    actions.append(send, sessions.element, configure);
     header2.append(actions);
+    sessions.refresh();
   }
   addStyles();
   waitFor(TITLE, mount);
