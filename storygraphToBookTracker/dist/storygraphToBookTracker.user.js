@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.5
+// @version      1.0.6
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -878,7 +878,7 @@
     display: inline-flex; align-items: center; gap: 6px;
     min-height: 24px;
     padding: 8px 14px; border: 1px solid transparent; border-radius: 0;
-    font: inherit; font-size: 0.875rem; font-weight: 600; line-height: 1.25;
+    font: inherit; font-size: 1rem; font-weight: 600; line-height: 1.25;
     color: #eff1f5; background: #8839ef; cursor: pointer;
 }
 .bt-button:hover { filter: brightness(.9); }
@@ -899,7 +899,7 @@
 .bt-toast {
     position: fixed; right: 20px; bottom: 20px; z-index: 2147483647;
     max-width: 320px; padding: 12px 16px; border-radius: 8px;
-    font: 500 14px/1.4 system-ui, sans-serif; color: #fff; background: #2f4763;
+    font: 500 1rem/1.4 system-ui, sans-serif; color: #fff; background: #2f4763;
     box-shadow: 0 6px 20px rgba(0,0,0,.25);
     opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s;
 }
@@ -918,9 +918,9 @@
     width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px);
     display: flex; flex-direction: column; overflow: hidden;
     border-radius: 12px; background: #fff; color: #1d2733;
-    font: 14px/1.5 system-ui, sans-serif;
+    font: 1rem/1.5 system-ui, sans-serif;
 }
-.bt-panel h2 { margin: 0; padding: 18px 20px; font-size: 17px; border-bottom: 1px solid #e3e7ed; }
+.bt-panel h2 { margin: 0; padding: 18px 20px; font-size: 1.0625rem; border-bottom: 1px solid #e3e7ed; }
 .bt-panel__body { padding: 16px 20px; overflow-y: auto; }
 .bt-panel__footer {
     display: flex; gap: 8px; justify-content: flex-end;
@@ -936,12 +936,12 @@
 }
 .bt-field--check { display: flex; align-items: center; gap: 8px; }
 .bt-field--check label { margin: 0; font-weight: 400; }
-.bt-hint { margin-top: 4px; font-size: 12px; color: #6b7686; }
+.bt-hint { margin-top: 4px; font-size: 0.8125rem; color: #6b7686; }
 
 .bt-change { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid #eef1f5; }
 .bt-change:first-child { border-top: 0; }
 .bt-change__name { font-weight: 600; }
-.bt-change__values { font-size: 13px; word-break: break-word; }
+.bt-change__values { font-size: 0.875rem; word-break: break-word; }
 .bt-change__old { color: #8a3b3b; text-decoration: line-through; }
 .bt-change__new { color: #2c6b45; }
 `;
