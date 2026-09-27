@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.6
+// @version      1.0.8
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -258,8 +258,8 @@
     };
   }
   class ReadingTracker {
-    constructor(settings2) {
-      this.settings = settings2;
+    constructor(settings) {
+      this.settings = settings;
     }
     /** Who the tracker thinks is calling, which is who the books get filed under. */
     async me() {
@@ -273,10 +273,11 @@
      * Sends a scraped book.
      *
      * @param dryRun ask what would change and write nothing
+     * @param fields the fields to write; none means all of them
      * @returns {Promise<{action: string, book_ID: string, changes: Array}>}
      */
-    importBook(book, { dryRun = false } = {}) {
-      return this.request("POST", "/importBook", { book, dryRun });
+    importBook(book, { dryRun = false, fields } = {}) {
+      return this.request("POST", "/importBook", { book, dryRun, fields });
     }
     /**
      * The book behind a scraped page as the shelf knows it, asked the same
@@ -339,7 +340,7 @@
           timeout: 2e4,
           onload: (response) => {
             if (response.status >= 200 && response.status < 300) {
-              resolve(parse(response.responseText));
+              settle(resolve, reject, response.responseText);
             } else {
               reject(new Error(messageFor(response)));
             }
@@ -350,11 +351,11 @@
       });
     }
   }
-  function parse(text2) {
+  function settle(resolve, reject, text2) {
     try {
-      return JSON.parse(text2);
+      resolve(JSON.parse(text2));
     } catch {
-      throw new Error("The tracker answered with something that is not JSON");
+      reject(new Error("The tracker answered with something that is not JSON"));
     }
   }
   function messageFor(response) {
@@ -559,16 +560,16 @@
     }, ms);
     return element;
   }
-  function openSettings(settings2, tracker2) {
+  function openSettings(settings, tracker) {
     const body = el("div");
     body.append(
       el("p", null, { textContent: "Books are filed under the friend these credentials belong to." }),
-      ...connectionFields(settings2),
-      testRow(tracker2),
+      ...connectionFields(settings),
+      testRow(tracker),
       el("h2", null, { textContent: "What the per-book panel opens on" }),
-      ...askedFields(settings2),
+      ...askedFields(settings),
       el("h2", null, { textContent: "Sent with every book" }),
-      ...defaultFields(settings2)
+      ...defaultFields(settings)
     );
     panel({
       title: "Reading Tracker",
@@ -576,35 +577,35 @@
       footer: [{ label: "Done" }]
     });
   }
-  function connectionFields(settings2) {
+  function connectionFields(settings) {
     return [
       field({
         label: "Server",
-        value: settings2.get("baseURL"),
+        value: settings.get("baseURL"),
         hint: "The address you open the tracker at, e.g. https://books.example.com",
-        onInput: (value) => settings2.set("baseURL", value)
+        onInput: (value) => settings.set("baseURL", value)
       }),
       field({
         label: "Username",
-        value: settings2.get("username"),
-        onInput: (value) => settings2.set("username", value)
+        value: settings.get("username"),
+        onInput: (value) => settings.set("username", value)
       }),
       field({
         label: "Password",
         type: "password",
-        value: settings2.get("password"),
+        value: settings.get("password"),
         hint: "Your Traefik login. Kept in this browser, in the userscript manager's storage.",
-        onInput: (value) => settings2.set("password", value)
+        onInput: (value) => settings.set("password", value)
       })
     ];
   }
-  function testRow(tracker2) {
+  function testRow(tracker) {
     const wrapper = el("div", "bt-field");
-    const test = el("button", "bt-button bt-button--quiet", { type: "button", textContent: "Test connection" });
+    const test = button("Test connection", "bt-button bt-button--quiet");
     test.addEventListener("click", async () => {
       test.disabled = true;
       try {
-        toast(`Signed in as ${await tracker2.me()}`);
+        toast(`Signed in as ${await tracker.me()}`);
       } catch (error) {
         toast(error.message, { error: true });
       } finally {
@@ -614,85 +615,85 @@
     wrapper.append(test);
     return wrapper;
   }
-  function askedFields(settings2) {
+  function askedFields(settings) {
     return [
       field({
         label: "Interest",
         type: "number",
         min: 1,
         max: 10,
-        value: settings2.get("interest"),
+        value: settings.get("interest"),
         hint: "1 to 10, how much you want to read it. Leave empty and the panel starts empty.",
-        onInput: (value) => settings2.set("interest", value)
+        onInput: (value) => settings.set("interest", value)
       }),
       checkbox({
         label: "Owned by default",
-        checked: settings2.get("ownedPhysically"),
-        onChange: (value) => settings2.set("ownedPhysically", value)
+        checked: settings.get("ownedPhysically"),
+        onChange: (value) => settings.set("ownedPhysically", value)
       }),
       checkbox({
         label: "On Audiobookshelf by default",
-        checked: settings2.get("onAudiobookshelf"),
-        onChange: (value) => settings2.set("onAudiobookshelf", value)
+        checked: settings.get("onAudiobookshelf"),
+        onChange: (value) => settings.set("onAudiobookshelf", value)
       })
     ];
   }
-  function defaultFields(settings2) {
+  function defaultFields(settings) {
     return [
       field({
         label: "Recommended by",
-        value: settings2.get("recommendedBy"),
+        value: settings.get("recommendedBy"),
         hint: "Names, separated by commas.",
-        onInput: (value) => settings2.set("recommendedBy", value)
+        onInput: (value) => settings.set("recommendedBy", value)
       }),
       checkbox({
         label: "Ask before overwriting a book that is already on the shelf",
-        checked: settings2.get("confirmOverwrites"),
-        onChange: (value) => settings2.set("confirmOverwrites", value)
+        checked: settings.get("confirmOverwrites"),
+        onChange: (value) => settings.set("confirmOverwrites", value)
       })
     ];
   }
-  async function sendBook(book, { tracker: tracker2, settings: settings2 }) {
-    if (!settings2.isConfigured()) {
+  async function sendBook(book, { tracker, settings }) {
+    if (!settings.isConfigured()) {
       toast("Tell the script where the tracker is first", { error: true });
-      openSettings(settings2, tracker2);
+      openSettings(settings, tracker);
       return;
     }
-    const details = await askBookDetails({ title: book.title, defaults: settings2.askedDefaults() });
+    const details = await askBookDetails({ title: book.title, defaults: settings.askedDefaults() });
     if (!details) {
       toast("Nothing sent");
       return;
     }
     const sending = { ...book, ...details };
     console.info("[Reading Tracker] sending", sending);
-    const preview = await tracker2.importBook(sending, { dryRun: true });
+    const preview = await tracker.importBook(sending, { dryRun: true });
     if (preview.action === "unchanged") {
-      toast("Already up to date", { link: linkTo(settings2, preview.book_ID) });
+      toast("Already up to date", { link: linkTo(settings, preview.book_ID) });
       return;
     }
-    const fields = await fieldsToWrite(preview, settings2);
+    const fields = await fieldsToWrite(preview, settings);
     if (fields === null) {
       toast("Nothing sent");
       return;
     }
-    report(await tracker2.importBook(sending, { fields }), settings2);
+    report(await tracker.importBook(sending, { fields }), settings);
   }
-  async function fieldsToWrite(preview, settings2) {
-    if (preview.action !== "updated" || !settings2.get("confirmOverwrites")) return void 0;
+  async function fieldsToWrite(preview, settings) {
+    if (preview.action !== "updated" || !settings.get("confirmOverwrites")) return void 0;
     const keep = await askWhatToKeep(preview.changes);
     if (!keep) return null;
     if (!keep.size) return null;
     return [...keep];
   }
-  function report(result, settings2) {
-    const link = linkTo(settings2, result.book_ID);
+  function report(result, settings) {
+    const link = linkTo(settings, result.book_ID);
     if (result.action === "created") toast("Added to your shelf", { link });
     else if (result.action === "updated") toast(`Updated ${result.changes.length} field(s)`, { link });
     else toast("Already up to date", { link });
   }
-  function linkTo(settings2, bookId) {
+  function linkTo(settings, bookId) {
     if (!bookId) return void 0;
-    return { href: `${settings2.origin()}/#/list/Books`, label: "Open shelf" };
+    return { href: `${settings.origin()}/#/list/Books`, label: "Open shelf" };
   }
   function wireButton(element, getBook, context) {
     element.addEventListener("click", async () => {
@@ -800,54 +801,55 @@
       })
     ];
   }
-  function createSessionControls({ tracker: tracker2, settings: settings2, getBook }) {
-    const button2 = el("button", "bt-button", { type: "button", hidden: true });
+  function createSessionControls({ tracker, settings, getBook }) {
+    const button$1 = button("");
+    button$1.hidden = true;
     let state = null;
     let pass = 0;
-    button2.addEventListener("click", () => {
+    button$1.addEventListener("click", () => {
       if (!state) return;
       if (state.session) finishReading();
       else startReading();
     });
     async function refresh() {
       const mine = ++pass;
-      button2.hidden = true;
+      button$1.hidden = true;
       state = null;
-      if (!settings2.isConfigured()) return;
+      if (!settings.isConfigured()) return;
       try {
-        const next = await resolveState(tracker2, settings2, getBook);
-        if (mine !== pass || !button2.isConnected) return;
+        const next = await resolveState(tracker, settings, getBook);
+        if (mine !== pass || !button$1.isConnected) return;
         state = next;
-        showButton(button2, next);
+        showButton(button$1, next);
       } catch (error) {
-        if (mine !== pass || !button2.isConnected) return;
+        if (mine !== pass || !button$1.isConnected) return;
         toast(error.message, { error: true, ms: 6e3 });
       }
     }
     async function startReading() {
-      await run(button2, async () => {
-        await tracker2.startSession(state.book_ID);
-        toast("Reading started", { link: shelfLink(settings2) });
+      await run(button$1, async () => {
+        await tracker.startSession(state.book_ID);
+        toast("Reading started", { link: shelfLink(settings) });
       }, refresh);
     }
     async function finishReading() {
       const session = state.session;
       const patch = await askFinished(session);
       if (!patch) return;
-      await run(button2, async () => {
-        await tracker2.patchSession(session.ID, patch);
+      await run(button$1, async () => {
+        await tracker.patchSession(session.ID, patch);
         const message = patch.didNotFinish ? "Marked as did not finish" : "Finished";
-        toast(message, { link: shelfLink(settings2) });
+        toast(message, { link: shelfLink(settings) });
       }, refresh);
     }
-    return { element: button2, refresh };
+    return { element: button$1, refresh };
   }
-  async function resolveState(tracker2, settings2, getBook) {
+  async function resolveState(tracker, settings, getBook) {
     const book = getBook();
     if (!book?.title) return null;
-    const shelf = await tracker2.findShelfBook(book);
+    const [shelf, me] = await Promise.all([tracker.findShelfBook(book), tracker.me()]);
     if (!shelf.onShelf) return null;
-    const session = await tracker2.openSession(shelf.book_ID, await tracker2.me());
+    const session = await tracker.openSession(shelf.book_ID, me);
     return { book_ID: shelf.book_ID, session };
   }
   function showButton(button2, state) {
@@ -870,8 +872,8 @@
     }
     await after();
   }
-  function shelfLink(settings2) {
-    return { href: `${settings2.origin()}/#/list/Books`, label: "Open shelf" };
+  function shelfLink(settings) {
+    return { href: `${settings.origin()}/#/list/Books`, label: "Open shelf" };
   }
   const CSS = `
 .bt-button {
@@ -948,6 +950,30 @@
   function addStyles() {
     _GM_addStyle(CSS);
   }
+  function mountTracker({ name, anchor, ready, fields }) {
+    const settings = new Settings(name);
+    const tracker = new ReadingTracker(settings);
+    const mount = () => mountBar(anchor, fields, settings, tracker);
+    addStyles();
+    waitFor(ready, mount);
+    onNavigate(() => waitFor(ready, mount));
+  }
+  function mountBar(anchor, fields, settings, tracker) {
+    if (document.querySelector(".bt-actions")) return;
+    const bar = document.querySelector(anchor);
+    if (!bar) return;
+    const actions = el("div", "bt-actions");
+    actions.style.cssText = "display:flex; gap:8px; margin:12px 0;";
+    const getBook = () => ({ ...scrape(fields), ...settings.bookDefaults() });
+    const sessions = createSessionControls({ tracker, settings, getBook });
+    const send = button("Add to Reading Tracker");
+    const configure = button("Settings", "bt-button bt-button--quiet");
+    wireButton(send, getBook, { tracker, settings, onDone: () => sessions.refresh() });
+    configure.addEventListener("click", () => openSettings(settings, tracker));
+    actions.append(send, sessions.element, configure);
+    bar.append(actions);
+    sessions.refresh();
+  }
   const TITLE = "h1.Text__title1, .BookPageTitleSection h1";
   const SERIES = "h3.Text__title3 a, .BookPageTitleSection__series a";
   const NOT_AUTHORS = /illustrator|translator|editor|narrator|foreword|introduction|contributor|photographer/i;
@@ -1008,26 +1034,11 @@
     coverURL: () => document.querySelector(".BookCover__image img, .ResponsiveImage")?.src || meta("og:image"),
     description: () => text('[data-testid="description"] .Formatted', ".BookPageMetadataSection__description .Formatted")
   };
-  const settings = new Settings("goodreadsToBookTracker");
-  const tracker = new ReadingTracker(settings);
-  function mount() {
-    if (document.querySelector(".bt-actions")) return;
-    const bar = document.querySelector(".BookActions, .BookPageTitleSection");
-    if (!bar) return;
-    const actions = el("div", "bt-actions");
-    actions.style.cssText = "display:flex; gap:8px; margin:12px 0;";
-    const getBook = () => ({ ...scrape(FIELDS), ...settings.bookDefaults() });
-    const sessions = createSessionControls({ tracker, settings, getBook });
-    const send = el("button", "bt-button", { type: "button", textContent: "Add to Reading Tracker" });
-    const configure = el("button", "bt-button bt-button--quiet", { type: "button", textContent: "Settings" });
-    wireButton(send, getBook, { tracker, settings, onDone: () => sessions.refresh() });
-    configure.addEventListener("click", () => openSettings(settings, tracker));
-    actions.append(send, sessions.element, configure);
-    bar.append(actions);
-    sessions.refresh();
-  }
-  addStyles();
-  waitFor("h1.Text__title1, .BookPageTitleSection h1", mount);
-  onNavigate(() => waitFor("h1.Text__title1, .BookPageTitleSection h1", mount));
+  mountTracker({
+    name: "goodreadsToBookTracker",
+    anchor: ".BookActions, .BookPageTitleSection",
+    ready: "h1.Text__title1, .BookPageTitleSection h1",
+    fields: FIELDS
+  });
 
 })();
