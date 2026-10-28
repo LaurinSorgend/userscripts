@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.9
+// @version      1.0.10
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -84,6 +84,11 @@
     "ap",
     "abu"
   ]);
+  function typeFor(pages2, genres2) {
+    if ((genres2 ?? []).some((genre) => NONFICTION.test(String(genre).trim()))) return "Non-Fiction";
+    return typeForPages(pages2);
+  }
+  const NONFICTION = /^non[-\s]?fiction$/i;
   function typeForPages(pages2) {
     const count = Number(pages2);
     if (!count) return "";
@@ -1014,14 +1019,17 @@
     }
     return "";
   }
+  function genres() {
+    return texts(".book-page-tag-section span");
+  }
   const FIELDS = {
     title: () => text(`${HEADER} h3.font-serif`, `${HEADER} h3.font-semibold`),
     authors,
     narrator: () => people((text2) => /narrator/i.test(text2)).map(lastFirst)[0] ?? "",
     series: () => seriesLinks()[0]?.textContent.trim() ?? "",
     seriesIndex: () => firstNumber(seriesLinks()[1]?.textContent ?? ""),
-    type: () => typeForPages(pages()),
-    genres: () => texts(".book-page-tag-section span"),
+    type: () => typeFor(pages(), genres()),
+    genres,
     pages,
     publishedOn: published,
     goodreadsRating: () => firstNumber((reviews() ?? document).querySelector(".average-star-rating")?.textContent ?? ""),

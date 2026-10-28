@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.9
+// @version      1.0.10
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -84,6 +84,11 @@
     "ap",
     "abu"
   ]);
+  function typeFor(pages2, genres2) {
+    if ((genres2 ?? []).some((genre) => NONFICTION.test(String(genre).trim()))) return "Non-Fiction";
+    return typeForPages(pages2);
+  }
+  const NONFICTION = /^non[-\s]?fiction$/i;
   function typeForPages(pages2) {
     const count = Number(pages2);
     if (!count) return "";
@@ -1015,6 +1020,9 @@
     const match = /^(.*?)\s*#\s*(\d+(?:\.\d+)?)\s*$/.exec(stated);
     return match ? { name: match[1].trim(), index: Number(match[2]) } : { name: stated, index: null };
   }
+  function genres() {
+    return texts('[data-testid="genresList"] .Button__labelItem, .BookPageMetadataSection__genreButton .Button__labelItem').filter((genre) => genre !== "...more");
+  }
   const FIELDS = {
     title: () => text(TITLE),
     authors: () => contributors().filter((person) => !NOT_AUTHORS.test(person.role)).map((person) => lastFirst(person.name)),
@@ -1024,8 +1032,8 @@
     },
     series: () => seriesParts().name,
     seriesIndex: () => seriesParts().index,
-    type: () => typeForPages(pages()),
-    genres: () => texts('[data-testid="genresList"] .Button__labelItem, .BookPageMetadataSection__genreButton .Button__labelItem').filter((genre) => genre !== "...more"),
+    type: () => typeFor(pages(), genres()),
+    genres,
     pages,
     publishedOn: published,
     goodreadsRating: () => firstNumber(text(".RatingStatistics__rating", '[data-testid="averageRating"]')),
