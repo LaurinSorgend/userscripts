@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.10
+// @version      1.0.11
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -32,6 +32,7 @@
     goodreadsRating: "Rating",
     goodreadsRatingCount: "Ratings",
     goodreadsURL: "Link",
+    isbn: "ISBN",
     coverURL: "Cover",
     description: "Description",
     country: "Country",
@@ -40,6 +41,10 @@
     onAudiobookshelf: "On Audiobookshelf",
     recommendedBy: "Recommended by"
   };
+  function isbnIn(text2) {
+    const compact = String(text2 ?? "").replace(/(\d)[\s-](?=[\dXx])/g, "$1");
+    return /\b97[89]\d{10}\b/.exec(compact)?.[0] ?? /\b\d{9}[\dXx]\b/.exec(compact)?.[0].toUpperCase() ?? "";
+  }
   function lastFirst(name) {
     const text2 = String(name ?? "").trim().replace(/\s+/g, " ");
     if (!text2 || text2.includes(",")) return text2;
@@ -1009,15 +1014,20 @@
   function reviews() {
     return document.querySelector("turbo-frame#community_reviews");
   }
-  function published() {
+  function editionInfo(labelled) {
     for (const paragraph of document.querySelectorAll(".edition-info p.text-sm")) {
       const label = paragraph.querySelector("span.font-semibold");
-      if (label?.textContent.trim() !== "Edition Pub Date:") continue;
-      const stated = paragraph.textContent.replace(label.textContent, "").trim();
-      const parsed = Date.parse(stated);
-      if (!Number.isNaN(parsed)) return new Date(parsed).toISOString().slice(0, 10);
+      if (!label || !labelled.test(label.textContent.trim())) continue;
+      return paragraph.textContent.replace(label.textContent, "").trim();
     }
     return "";
+  }
+  function published() {
+    const parsed = Date.parse(editionInfo(/^Edition Pub Date:$/));
+    return Number.isNaN(parsed) ? "" : new Date(parsed).toISOString().slice(0, 10);
+  }
+  function isbn() {
+    return isbnIn(editionInfo(/^ISBN/i));
   }
   function genres() {
     return texts(".book-page-tag-section span");
@@ -1037,6 +1047,7 @@
       /based on (\d+) reviews/.exec(reviews()?.querySelector('[aria-label*="based on"]')?.getAttribute("aria-label") ?? "")?.[1] ?? ""
     ),
     goodreadsURL: () => canonical().split("?")[0],
+    isbn,
     coverURL: () => meta("og:image"),
     description: () => text(".blurb-pane .trix-content", '[data-testid="book-description"]')
   };

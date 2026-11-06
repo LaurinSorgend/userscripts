@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.10
+// @version      1.0.11
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -32,6 +32,7 @@
     goodreadsRating: "Rating",
     goodreadsRatingCount: "Ratings",
     goodreadsURL: "Link",
+    isbn: "ISBN",
     coverURL: "Cover",
     description: "Description",
     country: "Country",
@@ -40,6 +41,10 @@
     onAudiobookshelf: "On Audiobookshelf",
     recommendedBy: "Recommended by"
   };
+  function isbnIn(text2) {
+    const compact = String(text2 ?? "").replace(/(\d)[\s-](?=[\dXx])/g, "$1");
+    return /\b97[89]\d{10}\b/.exec(compact)?.[0] ?? /\b\d{9}[\dXx]\b/.exec(compact)?.[0].toUpperCase() ?? "";
+  }
   function lastFirst(name) {
     const text2 = String(name ?? "").trim().replace(/\s+/g, " ");
     if (!text2 || text2.includes(",")) return text2;
@@ -1023,6 +1028,19 @@
   function genres() {
     return texts('[data-testid="genresList"] .Button__labelItem, .BookPageMetadataSection__genreButton .Button__labelItem').filter((genre) => genre !== "...more");
   }
+  function isbn() {
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const found = isbnIn(JSON.parse(script.textContent)?.isbn);
+        if (found) return found;
+      } catch {
+      }
+    }
+    for (const term of document.querySelectorAll(".EditionDetails dt, .DescListItem dt")) {
+      if (/isbn/i.test(term.textContent)) return isbnIn(term.nextElementSibling?.textContent);
+    }
+    return "";
+  }
   const FIELDS = {
     title: () => text(TITLE),
     authors: () => contributors().filter((person) => !NOT_AUTHORS.test(person.role)).map((person) => lastFirst(person.name)),
@@ -1039,6 +1057,7 @@
     goodreadsRating: () => firstNumber(text(".RatingStatistics__rating", '[data-testid="averageRating"]')),
     goodreadsRatingCount: () => firstNumber(text('[data-testid="ratingsCount"]', ".RatingStatistics__meta span")),
     goodreadsURL: () => canonical().split("?")[0],
+    isbn,
     coverURL: () => document.querySelector(".BookCover__image img, .ResponsiveImage")?.src || meta("og:image"),
     description: () => text('[data-testid="description"] .Formatted', ".BookPageMetadataSection__description .Formatted")
   };
