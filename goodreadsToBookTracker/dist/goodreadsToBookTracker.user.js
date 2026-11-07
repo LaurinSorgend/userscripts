@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.75
+// @version      1.0.76
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -293,6 +293,10 @@
     patchSession(id, patch) {
       return this.request("PATCH", `/ReadingSessions(${id})`, patch);
     }
+    /** Writes a `finalComment`, the book's final verdict. The owner is stamped by the server. */
+    createFinalComment(comment) {
+      return this.request("POST", "/Comments", comment);
+    }
     get service() {
       return `${this.settings.origin()}/odata/v4/reading`;
     }
@@ -390,6 +394,13 @@
     if (max !== void 0) input.max = String(max);
     wrapper.append(el("label", null, { textContent: label }), input);
     if (hint) wrapper.append(el("div", "bt-hint", { textContent: hint }));
+    input.addEventListener("input", () => onInput(input.value));
+    return wrapper;
+  }
+  function textArea({ label, value, rows = 3, placeholder, onInput }) {
+    const wrapper = el("div", "bt-field");
+    const input = el("textarea", null, { value: value ?? "", rows, placeholder });
+    wrapper.append(el("label", null, { textContent: label }), input);
     input.addEventListener("input", () => onInput(input.value));
     return wrapper;
   }
@@ -719,10 +730,16 @@
       didNotFinishAtPercentage: input.didNotFinish && input.stoppedAt !== null ? String(input.stoppedAt) : null
     };
   }
+  function finalComment(input, bookId) {
+    const comment = input.comment.trim();
+    return comment ? { book_ID: bookId, comment, isFinal: true } : null;
+  }
   const t73 = "Finished on";
   const t74 = "Rating";
   const t76 = "Gave up";
   const t77 = "Stopped at %";
+  const t78 = "Final comment";
+  const t79 = "Optional, saved as your final comment on the book";
   const t80 = "{0} to {1}, optional";
   const t81 = "Rate it between 1 and 10, or leave the rating empty.";
   const t82 = "Pick the day you finished it.";
@@ -733,9 +750,9 @@
   function fill(text2, ...values) {
     return text2.replace(/\{(\d+)\}/g, (_, index) => values[index] ?? "");
   }
-  function askFinished({ startedOn, asAudiobook }) {
+  function askFinished({ startedOn, asAudiobook }, bookId) {
     return new Promise((resolve) => {
-      const state = { finishedOn: todayISO(), rating: "", didNotFinish: false, stoppedAt: "" };
+      const state = { finishedOn: todayISO(), rating: "", didNotFinish: false, stoppedAt: "", comment: "" };
       const body = el("div");
       const hint = el("div", "bt-hint", { textContent: "" });
       const stoppedField = field({
@@ -755,6 +772,7 @@
           stoppedField.hidden = !state.didNotFinish;
         }),
         stoppedField,
+        verdictField(state),
         hint
       );
       let answered = false;
@@ -768,7 +786,8 @@
           hint.textContent = fill(HINTS[problem], startedOn);
           return false;
         }
-        answer(finishPatch({ ...state, asAudiobook }));
+        const input = { ...state, asAudiobook };
+        answer({ patch: finishPatch(input), comment: finalComment(input, bookId) });
         return void 0;
       };
       const { onClose } = panel({
@@ -815,6 +834,16 @@
       })
     ];
   }
+  function verdictField(state) {
+    return textArea({
+      label: t78,
+      value: state.comment,
+      placeholder: t79,
+      onInput: (value) => {
+        state.comment = value;
+      }
+    });
+  }
   function createSessionControls({ tracker, settings, getBook }) {
     const button$1 = button("");
     button$1.hidden = true;
@@ -849,10 +878,12 @@
     }
     async function finishReading() {
       const session = state.session;
-      const patch = await askFinished(session);
-      if (!patch) return;
+      const answer = await askFinished(session, state.book_ID);
+      if (!answer) return;
+      const { patch, comment } = answer;
       await whileBusy(button$1, "Working…", async () => {
         await tracker.patchSession(session.ID, patch);
+        if (comment) await tracker.createFinalComment(comment);
         const message = patch.didNotFinish ? "Marked as did not finish" : "Finished";
         toast(message, { link: settings.shelfLink(state.book_ID) });
       });
@@ -929,10 +960,11 @@
 
 .bt-field { margin-bottom: 14px; }
 .bt-field label { display: block; margin-bottom: 4px; font-weight: 600; }
-.bt-field input[type=text], .bt-field input[type=password], .bt-field input[type=number], .bt-field input[type=date] {
+.bt-field input[type=text], .bt-field input[type=password], .bt-field input[type=number], .bt-field input[type=date], .bt-field textarea {
     width: 100%; box-sizing: border-box; padding: 8px 10px;
     border: 1px solid #c6ced9; border-radius: 6px; font: inherit; background: #fff; color: inherit;
 }
+.bt-field textarea { resize: vertical; }
 .bt-field--check { display: flex; align-items: center; gap: 8px; }
 .bt-field--check label { margin: 0; font-weight: 400; }
 .bt-hint { margin-top: 4px; font-size: 14px; color: #6b7686; }
