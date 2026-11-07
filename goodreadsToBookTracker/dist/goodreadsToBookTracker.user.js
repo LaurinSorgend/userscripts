@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.11
+// @version      1.0.75
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -19,6 +19,39 @@
 (function () {
   'use strict';
 
+  const particles = [
+    "de",
+    "del",
+    "della",
+    "der",
+    "den",
+    "des",
+    "di",
+    "do",
+    "dos",
+    "du",
+    "da",
+    "das",
+    "la",
+    "las",
+    "le",
+    "les",
+    "lo",
+    "van",
+    "von",
+    "ter",
+    "ten",
+    "af",
+    "av",
+    "bin",
+    "ibn",
+    "al",
+    "el",
+    "san",
+    "santa",
+    "ap",
+    "abu"
+  ];
   const LABELS = {
     title: "Title",
     authors: "Author",
@@ -56,39 +89,7 @@
     }
     return `${surname.join(" ")}, ${parts.join(" ")}`;
   }
-  const PARTICLES = /* @__PURE__ */ new Set([
-    "de",
-    "del",
-    "della",
-    "der",
-    "den",
-    "des",
-    "di",
-    "do",
-    "dos",
-    "du",
-    "da",
-    "das",
-    "la",
-    "las",
-    "le",
-    "les",
-    "lo",
-    "van",
-    "von",
-    "ter",
-    "ten",
-    "af",
-    "av",
-    "bin",
-    "ibn",
-    "al",
-    "el",
-    "san",
-    "santa",
-    "ap",
-    "abu"
-  ]);
+  const PARTICLES = new Set(particles);
   function typeFor(pages2, genres2) {
     if ((genres2 ?? []).some((genre) => NONFICTION.test(String(genre).trim()))) return "Non-Fiction";
     return typeForPages(pages2);
@@ -136,12 +137,12 @@
   function canonical() {
     return document.querySelector('link[rel="canonical"]')?.href ?? window.location.href;
   }
-  function waitFor(selector, onFound, { every = 100, timeout = 15e3 } = {}) {
+  function waitFor(selector, onFound) {
     const start = Date.now();
     (function check() {
       const element = document.querySelector(selector);
       if (element) onFound(element);
-      else if (Date.now() - start < timeout) setTimeout(check, every);
+      else if (Date.now() - start < 15e3) setTimeout(check, 100);
     })();
   }
   function onNavigate(onChange) {
@@ -169,7 +170,7 @@
     confirmOverwrites: true
   };
   class Settings {
-    constructor(storageKey = "bookTracker") {
+    constructor(storageKey) {
       this.storageKey = storageKey;
       this.values = this.load();
     }
@@ -199,6 +200,10 @@
     origin() {
       return String(this.values.baseURL || "").trim().replace(/\/+$/, "");
     }
+    /** The book's page in the app, or the books list when the id is not known. */
+    shelfLink(bookId) {
+      return bookId ? { href: `${this.origin()}/#/books/${bookId}`, label: "Open book" } : { href: `${this.origin()}/#/list/Books`, label: "Open shelf" };
+    }
     /**
      * The fields the friend fills in once rather than per book. Interest and
      * the two flags are not among them: they are asked per book in
@@ -217,67 +222,27 @@
       };
     }
   }
-  const MIN_RATING = 1;
-  const MAX_RATING = 10;
-  const HINTS = {
-    finishNoDate: "Pick the day you finished.",
-    finishFuture: "That date is in the future.",
-    finishBeforeStart: "Finished before it started — check the dates.",
-    finishBadRating: `Rating must be ${MIN_RATING} to ${MAX_RATING}, or left empty.`,
-    finishBadPercentage: "Stopped-at must be 0 to 100."
-  };
-  function todayISO(now) {
+  function todayISO(now = /* @__PURE__ */ new Date()) {
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
     return `${now.getFullYear()}-${month}-${day}`;
-  }
-  function numberOf(value) {
-    if (value === null || value === void 0 || typeof value === "string" && value.trim() === "") {
-      return null;
-    }
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
-  }
-  function isRating(value) {
-    const number = numberOf(value);
-    return number !== null && number >= MIN_RATING && number <= MAX_RATING;
-  }
-  function isRated(value) {
-    const number = numberOf(value);
-    return value !== null && value !== void 0 && String(value).trim() !== "" && number !== 0;
-  }
-  function isPercentage(value) {
-    const number = numberOf(value);
-    return number !== null && number >= 0 && number <= 100;
-  }
-  function finishProblem(input, startedOn, today) {
-    if (!input.finishedOn) return "finishNoDate";
-    if (input.finishedOn > today) return "finishFuture";
-    if (startedOn && input.finishedOn < startedOn) return "finishBeforeStart";
-    if (isRated(input.rating) && !isRating(input.rating)) return "finishBadRating";
-    if (input.didNotFinish && !isPercentage(input.stoppedAt)) return "finishBadPercentage";
-    return null;
-  }
-  function finishPatch(input) {
-    return {
-      finishedOn: input.finishedOn,
-      personalRating: isRated(input.rating) ? String(numberOf(input.rating)) : null,
-      asAudiobook: Boolean(input.asAudiobook),
-      didNotFinish: Boolean(input.didNotFinish),
-      didNotFinishAtPercentage: input.didNotFinish && String(input.stoppedAt ?? "").trim() !== "" ? String(input.stoppedAt) : null
-    };
   }
   class ReadingTracker {
     constructor(settings) {
       this.settings = settings;
     }
-    /** Who the tracker thinks is calling, which is who the books get filed under. */
+    /**
+     * Who the tracker thinks is calling, which is who the books get filed
+     * under. Asked again once the server or the credentials in the settings
+     * change.
+     */
     async me() {
-      if (!this.userId) {
+      const caller = `${this.service} ${this.authorization()}`;
+      if (this.user?.caller !== caller) {
         const { id } = await this.request("GET", "/me()");
-        this.userId = id;
+        this.user = { caller, id };
       }
-      return this.userId;
+      return this.user.id;
     }
     /**
      * Sends a scraped book.
@@ -320,7 +285,7 @@
     startSession(bookId) {
       return this.request("POST", "/ReadingSessions", {
         book_ID: bookId,
-        startedOn: todayISO(/* @__PURE__ */ new Date()),
+        startedOn: todayISO(),
         asAudiobook: false
       });
     }
@@ -416,8 +381,7 @@
     });
     document.addEventListener("keydown", onKey);
     document.body.append(backdrop);
-    backdrop.classList.add("bt-backdrop--shown");
-    return { close, onClose: (handler) => backdrop.addEventListener("bt-closed", handler) };
+    return { onClose: (handler) => backdrop.addEventListener("bt-closed", handler) };
   }
   function field({ label, value, type = "text", hint, min, max, onInput }) {
     const wrapper = el("div", "bt-field");
@@ -570,6 +534,19 @@
     }, ms);
     return element;
   }
+  async function whileBusy(button2, busyLabel, action) {
+    const label = button2.textContent;
+    button2.disabled = true;
+    button2.textContent = busyLabel;
+    try {
+      await action();
+    } catch (error) {
+      toast(error.message, { error: true, ms: 6e3 });
+    } finally {
+      button2.disabled = false;
+      button2.textContent = label;
+    }
+  }
   function openSettings(settings, tracker) {
     const body = el("div");
     body.append(
@@ -675,10 +652,9 @@
       return;
     }
     const sending = { ...book, ...details };
-    console.info("[Reading Tracker] sending", sending);
     const preview = await tracker.importBook(sending, { dryRun: true });
     if (preview.action === "unchanged") {
-      toast("Already up to date", { link: linkTo(settings, preview.book_ID) });
+      toast("Already up to date", { link: settings.shelfLink(preview.book_ID) });
       return;
     }
     const fields = await fieldsToWrite(preview, settings);
@@ -686,54 +662,84 @@
       toast("Nothing sent");
       return;
     }
-    report(await tracker.importBook(sending, { fields }), settings);
+    const result = await tracker.importBook(sending, { fields });
+    const message = result.action === "created" ? "Added to your shelf" : `Updated ${result.changes.length} field(s)`;
+    toast(message, { link: settings.shelfLink(result.book_ID) });
   }
   async function fieldsToWrite(preview, settings) {
     if (preview.action !== "updated" || !settings.get("confirmOverwrites")) return void 0;
     const keep = await askWhatToKeep(preview.changes);
-    if (!keep) return null;
-    if (!keep.size) return null;
-    return [...keep];
+    return keep?.size ? [...keep] : null;
   }
-  function report(result, settings) {
-    const link = linkTo(settings, result.book_ID);
-    if (result.action === "created") toast("Added to your shelf", { link });
-    else if (result.action === "updated") toast(`Updated ${result.changes.length} field(s)`, { link });
-    else toast("Already up to date", { link });
+  function numberOf(value) {
+    if (value === null || typeof value === "string" && value.trim() === "") {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   }
-  function linkTo(settings, bookId) {
-    if (!bookId) return void 0;
-    return { href: `${settings.origin()}/#/list/Books`, label: "Open shelf" };
+  const MIN_RATING = 1;
+  const MAX_RATING = 10;
+  function isPercentage(value) {
+    const number = numberOf(value);
+    return number !== null && number >= 0 && number <= 100;
   }
-  function wireButton(element, getBook, context) {
-    element.addEventListener("click", async () => {
-      if (element.disabled) return;
-      const label = element.textContent;
-      element.disabled = true;
-      element.textContent = "Sending…";
-      try {
-        await sendBook(getBook(), context);
-      } catch (error) {
-        toast(error.message, { error: true, ms: 6e3 });
-      } finally {
-        element.disabled = false;
-        element.textContent = label;
-        context.onDone?.();
-      }
-    });
+  function isRating(value) {
+    const number = numberOf(value);
+    return number !== null && number >= MIN_RATING && number <= MAX_RATING;
+  }
+  function isRated(value) {
+    const number = numberOf(value);
+    return value !== null && String(value).trim() !== "" && number !== 0;
+  }
+  function finishProblem(input, startedOn, today) {
+    if (!input.finishedOn) {
+      return "finishNoDate";
+    }
+    if (input.finishedOn > today) {
+      return "finishFuture";
+    }
+    if (startedOn && input.finishedOn < startedOn) {
+      return "finishBeforeStart";
+    }
+    if (isRated(input.rating) && !isRating(input.rating)) {
+      return "finishBadRating";
+    }
+    if (input.didNotFinish && !isPercentage(input.stoppedAt)) {
+      return "finishBadPercentage";
+    }
+    return null;
+  }
+  function finishPatch(input) {
+    return {
+      finishedOn: input.finishedOn,
+      personalRating: isRated(input.rating) ? String(numberOf(input.rating)) : null,
+      asAudiobook: input.asAudiobook,
+      didNotFinish: input.didNotFinish,
+      didNotFinishAtPercentage: input.didNotFinish && input.stoppedAt !== null ? String(input.stoppedAt) : null
+    };
+  }
+  const t73 = "Finished on";
+  const t74 = "Rating";
+  const t76 = "Gave up";
+  const t77 = "Stopped at %";
+  const t80 = "{0} to {1}, optional";
+  const t81 = "Rate it between 1 and 10, or leave the rating empty.";
+  const t82 = "Pick the day you finished it.";
+  const t83 = "That day has not come yet.";
+  const t84 = "You started this on {0}, so it cannot have been finished before then.";
+  const t85 = "Say how far you got, between 0 and 100.";
+  const HINTS = { finishNoDate: t82, finishFuture: t83, finishBeforeStart: t84, finishBadRating: t81, finishBadPercentage: t85 };
+  function fill(text2, ...values) {
+    return text2.replace(/\{(\d+)\}/g, (_, index) => values[index] ?? "");
   }
   function askFinished({ startedOn, asAudiobook }) {
     return new Promise((resolve) => {
-      const state = {
-        finishedOn: todayISO(/* @__PURE__ */ new Date()),
-        rating: "",
-        didNotFinish: false,
-        stoppedAt: ""
-      };
+      const state = { finishedOn: todayISO(), rating: "", didNotFinish: false, stoppedAt: "" };
       const body = el("div");
       const hint = el("div", "bt-hint", { textContent: "" });
       const stoppedField = field({
-        label: "Stopped at (%)",
+        label: t77,
         type: "number",
         min: 0,
         max: 100,
@@ -756,23 +762,21 @@
         answered = true;
         resolve(value);
       };
+      const finish = () => {
+        const problem = finishProblem(state, startedOn, todayISO());
+        if (problem) {
+          hint.textContent = fill(HINTS[problem], startedOn);
+          return false;
+        }
+        answer(finishPatch({ ...state, asAudiobook }));
+        return void 0;
+      };
       const { onClose } = panel({
         title: "Finish reading",
         body,
         footer: [
           { label: "Cancel", quiet: true, onClick: () => answer(null) },
-          {
-            label: "Finish",
-            onClick: () => {
-              const problem = finishProblem(state, startedOn, todayISO(/* @__PURE__ */ new Date()));
-              if (problem) {
-                hint.textContent = HINTS[problem];
-                return false;
-              }
-              answer(finishPatch({ ...state, asAudiobook }));
-              return void 0;
-            }
-          }
+          { label: "Finish", onClick: finish }
         ]
       });
       onClose(() => {
@@ -783,7 +787,7 @@
   function finishFields(state, onDnfChange) {
     return [
       field({
-        label: "Finished on",
+        label: t73,
         type: "date",
         value: state.finishedOn,
         onInput: (value) => {
@@ -791,18 +795,18 @@
         }
       }),
       field({
-        label: "Rating",
+        label: t74,
         type: "number",
-        min: 1,
-        max: 10,
+        min: MIN_RATING,
+        max: MAX_RATING,
         value: state.rating,
-        hint: "1 to 10. Leave empty for no rating.",
+        hint: fill(t80, MIN_RATING, MAX_RATING),
         onInput: (value) => {
           state.rating = value;
         }
       }),
       checkbox({
-        label: "Did not finish",
+        label: t76,
         checked: state.didNotFinish,
         onChange: (value) => {
           state.didNotFinish = value;
@@ -827,7 +831,7 @@
       state = null;
       if (!settings.isConfigured()) return;
       try {
-        const next = await resolveState(tracker, settings, getBook);
+        const next = await resolveState(tracker, getBook);
         if (mine !== pass || !button$1.isConnected) return;
         state = next;
         showButton(button$1, next);
@@ -837,24 +841,26 @@
       }
     }
     async function startReading() {
-      await run(button$1, async () => {
+      await whileBusy(button$1, "Working…", async () => {
         await tracker.startSession(state.book_ID);
-        toast("Reading started", { link: shelfLink(settings) });
-      }, refresh);
+        toast("Reading started", { link: settings.shelfLink(state.book_ID) });
+      });
+      await refresh();
     }
     async function finishReading() {
       const session = state.session;
       const patch = await askFinished(session);
       if (!patch) return;
-      await run(button$1, async () => {
+      await whileBusy(button$1, "Working…", async () => {
         await tracker.patchSession(session.ID, patch);
         const message = patch.didNotFinish ? "Marked as did not finish" : "Finished";
-        toast(message, { link: shelfLink(settings) });
-      }, refresh);
+        toast(message, { link: settings.shelfLink(state.book_ID) });
+      });
+      await refresh();
     }
     return { element: button$1, refresh };
   }
-  async function resolveState(tracker, settings, getBook) {
+  async function resolveState(tracker, getBook) {
     const book = getBook();
     if (!book?.title) return null;
     const [shelf, me] = await Promise.all([tracker.findShelfBook(book), tracker.me()]);
@@ -866,24 +872,6 @@
     if (!state) return;
     button2.textContent = state.session ? "Finish reading" : "Start reading";
     button2.hidden = false;
-  }
-  async function run(button2, action, after) {
-    if (button2.disabled) return;
-    const label = button2.textContent;
-    button2.disabled = true;
-    button2.textContent = "Working…";
-    try {
-      await action();
-    } catch (error) {
-      toast(error.message, { error: true, ms: 6e3 });
-    } finally {
-      button2.disabled = false;
-      button2.textContent = label;
-    }
-    await after();
-  }
-  function shelfLink(settings) {
-    return { href: `${settings.origin()}/#/list/Books`, label: "Open shelf" };
   }
   const CSS = `
 .bt-button {
@@ -921,10 +909,9 @@
 
 .bt-backdrop {
     position: fixed; inset: 0; z-index: 2147483646;
-    display: none; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,.45);
 }
-.bt-backdrop--shown { display: flex; }
 
 .bt-panel {
     width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px);
@@ -963,40 +950,40 @@
   function mountTracker({ name, anchor, ready, fields }) {
     const settings = new Settings(name);
     const tracker = new ReadingTracker(settings);
-    const mount = () => mountBar(anchor, fields, settings, tracker);
+    const getBook = () => ({ ...scrape(pageFields(fields)), ...settings.bookDefaults() });
+    let mounted = null;
+    const mount = () => {
+      if (mounted?.bar.isConnected) mounted.sessions.refresh();
+      else mounted = mountBar(anchor, getBook, settings, tracker);
+    };
     addStyles();
     waitFor(ready, mount);
     onNavigate(() => waitFor(ready, mount));
   }
-  function mountBar(anchor, fields, settings, tracker) {
-    if (document.querySelector(".bt-actions")) return;
-    const bar = document.querySelector(anchor);
-    if (!bar) return;
-    const actions = el("div", "bt-actions");
-    actions.style.cssText = "display:flex; gap:8px; margin:12px 0;";
-    const getBook = () => ({ ...scrape(fields), ...settings.bookDefaults() });
+  function pageFields(fields) {
+    return {
+      ...fields,
+      type: () => typeFor(fields.pages(), fields.genres()),
+      goodreadsURL: () => canonical().split("?")[0]
+    };
+  }
+  function mountBar(anchor, getBook, settings, tracker) {
+    const parent = document.querySelector(anchor);
+    if (!parent) return null;
+    const bar = el("div", "bt-actions");
+    bar.style.cssText = "display:flex; gap:8px; margin:12px 0;";
     const sessions = createSessionControls({ tracker, settings, getBook });
     const send = button("Add to Reading Tracker");
     const configure = button("Settings", "bt-button bt-button--quiet");
-    wireButton(send, getBook, { tracker, settings, onDone: () => sessions.refresh() });
+    send.addEventListener("click", async () => {
+      await whileBusy(send, "Sending…", () => sendBook(getBook(), { tracker, settings }));
+      sessions.refresh();
+    });
     configure.addEventListener("click", () => openSettings(settings, tracker));
-    actions.append(send, sessions.element, configure);
-    bar.append(actions);
+    bar.append(send, sessions.element, configure);
+    parent.append(bar);
     sessions.refresh();
-  }
-  const TITLE = "h1.Text__title1, .BookPageTitleSection h1";
-  const SERIES = "h3.Text__title3 a, .BookPageTitleSection__series a";
-  const NOT_AUTHORS = /illustrator|translator|editor|narrator|foreword|introduction|contributor|photographer/i;
-  function contributors() {
-    return [...document.querySelectorAll(".ContributorLink, .BookPageMetadataSection__contributor a")].map((link) => ({
-      name: link.querySelector(".ContributorLink__name")?.textContent.trim() ?? link.textContent.trim(),
-      role: link.querySelector(".ContributorLink__role")?.textContent.trim() ?? ""
-    })).filter((person) => person.name);
-  }
-  function pages() {
-    const stated = text('p[data-testid="pagesFormat"]', ".BookDetails__info span", ".BookDetails__format");
-    const match = /(\d[\d,]*)\s+pages/i.exec(stated);
-    return match ? firstNumber(match[1]) : null;
+    return { bar, sessions };
   }
   const MONTHS = [
     "january",
@@ -1012,18 +999,60 @@
     "november",
     "december"
   ];
+  function isoDay(stated) {
+    const text2 = (stated ?? "").trim();
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text2);
+    if (iso) {
+      return dayOf(iso[1], Number(iso[2]) - 1, iso[3]);
+    }
+    const monthFirst = /^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(text2);
+    const dayFirst = /^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/.exec(text2);
+    const parts = monthFirst ? [monthFirst[1], monthFirst[2], monthFirst[3]] : dayFirst ? [dayFirst[2], dayFirst[1], dayFirst[3]] : null;
+    if (!parts) {
+      return void 0;
+    }
+    const [month, day, year] = parts;
+    const index = MONTHS.findIndex((name) => name.startsWith(month.toLowerCase()) && month.length >= 3);
+    return index < 0 ? void 0 : dayOf(year, index, day);
+  }
+  function dayOf(year, month, day) {
+    const date = new Date(Date.UTC(Number(year), month, Number(day)));
+    if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== month || date.getUTCDate() !== Number(day)) {
+      return void 0;
+    }
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${year}-${pad(month + 1)}-${pad(day)}`;
+  }
+  function seriesOf(stated) {
+    const text2 = (stated ?? "").trim().replace(/^\((.*)\)$/, "$1").trim();
+    if (!text2) {
+      return void 0;
+    }
+    const match = /^(.*?)(?:[\s,;]*#\s*|[\s,;]+(?:(?:no|vol)\.?|book)?\s*)(\d+(?:\.\d+)?)$/i.exec(text2);
+    const name = match?.[1].replace(/[\s,;:\-\u2013\u2014]+$/, "").trim();
+    return match && name ? { name, index: Number(match[2]) } : { name: text2 };
+  }
+  const TITLE = "h1.Text__title1, .BookPageTitleSection h1";
+  const SERIES = "h3.Text__title3 a, .BookPageTitleSection__series a";
+  const NOT_AUTHORS = /illustrator|translator|editor|narrator|foreword|introduction|contributor|photographer/i;
+  function contributors() {
+    return [...document.querySelectorAll(".ContributorLink, .BookPageMetadataSection__contributor a")].map((link) => ({
+      name: link.querySelector(".ContributorLink__name")?.textContent.trim() ?? link.textContent.trim(),
+      role: link.querySelector(".ContributorLink__role")?.textContent.trim() ?? ""
+    })).filter((person) => person.name);
+  }
+  function pages() {
+    const stated = text('p[data-testid="pagesFormat"]', ".BookDetails__info span", ".BookDetails__format");
+    const match = /(\d[\d,]*)\s+pages/i.exec(stated);
+    return match ? firstNumber(match[1]) : null;
+  }
   function published() {
     const stated = text('p[data-testid="publicationInfo"]', ".BookDetails__row span", ".BookDetails__publication");
     const match = /published\s+([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})/i.exec(stated);
-    if (!match) return "";
-    const month = MONTHS.indexOf(match[1].toLowerCase());
-    if (month < 0) return "";
-    return `${match[3]}-${String(month + 1).padStart(2, "0")}-${match[2].padStart(2, "0")}`;
+    return match ? isoDay(`${match[1]} ${match[2]}, ${match[3]}`) : "";
   }
-  function seriesParts() {
-    const stated = document.querySelector(SERIES)?.textContent.trim() ?? "";
-    const match = /^(.*?)\s*#\s*(\d+(?:\.\d+)?)\s*$/.exec(stated);
-    return match ? { name: match[1].trim(), index: Number(match[2]) } : { name: stated, index: null };
+  function series() {
+    return seriesOf(document.querySelector(SERIES)?.textContent);
   }
   function genres() {
     return texts('[data-testid="genresList"] .Button__labelItem, .BookPageMetadataSection__genreButton .Button__labelItem').filter((genre) => genre !== "...more");
@@ -1048,15 +1077,13 @@
       const narrator = contributors().find((person) => /narrator/i.test(person.role));
       return narrator ? lastFirst(narrator.name) : "";
     },
-    series: () => seriesParts().name,
-    seriesIndex: () => seriesParts().index,
-    type: () => typeFor(pages(), genres()),
+    series: () => series()?.name,
+    seriesIndex: () => series()?.index,
     genres,
     pages,
     publishedOn: published,
     goodreadsRating: () => firstNumber(text(".RatingStatistics__rating", '[data-testid="averageRating"]')),
     goodreadsRatingCount: () => firstNumber(text('[data-testid="ratingsCount"]', ".RatingStatistics__meta span")),
-    goodreadsURL: () => canonical().split("?")[0],
     isbn,
     coverURL: () => document.querySelector(".BookCover__image img, .ResponsiveImage")?.src || meta("og:image"),
     description: () => text('[data-testid="description"] .Formatted', ".BookPageMetadataSection__description .Formatted")
@@ -1064,7 +1091,7 @@
   mountTracker({
     name: "goodreadsToBookTracker",
     anchor: ".BookActions, .BookPageTitleSection",
-    ready: "h1.Text__title1, .BookPageTitleSection h1",
+    ready: TITLE,
     fields: FIELDS
   });
 
