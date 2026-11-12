@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.81
+// @version      1.0.99
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -19,88 +19,9 @@
 (function () {
   'use strict';
 
-  const particles = [
-    "de",
-    "del",
-    "della",
-    "der",
-    "den",
-    "des",
-    "di",
-    "do",
-    "dos",
-    "du",
-    "da",
-    "das",
-    "la",
-    "las",
-    "le",
-    "les",
-    "lo",
-    "van",
-    "von",
-    "ter",
-    "ten",
-    "af",
-    "av",
-    "bin",
-    "ibn",
-    "al",
-    "el",
-    "san",
-    "santa",
-    "ap",
-    "abu"
-  ];
-  const LABELS = {
-    title: "Title",
-    authors: "Author",
-    narrator: "Narrator",
-    series: "Series",
-    seriesIndex: "Number in series",
-    type: "Type",
-    genres: "Genres",
-    pages: "Pages",
-    publishedOn: "Published",
-    goodreadsRating: "Rating",
-    goodreadsRatingCount: "Ratings",
-    goodreadsURL: "Link",
-    isbn: "ISBN",
-    coverURL: "Cover",
-    description: "Description",
-    country: "Country",
-    interest: "Interest",
-    ownedPhysically: "Owned",
-    onAudiobookshelf: "On Audiobookshelf",
-    recommendedBy: "Recommended by"
-  };
   function isbnIn(text2) {
     const compact = String(text2 ?? "").replace(/(\d)[\s-](?=[\dXx])/g, "$1");
     return /\b97[89]\d{10}\b/.exec(compact)?.[0] ?? /\b\d{9}[\dXx]\b/.exec(compact)?.[0].toUpperCase() ?? "";
-  }
-  function lastFirst(name) {
-    const text2 = String(name ?? "").trim().replace(/\s+/g, " ");
-    if (!text2 || text2.includes(",")) return text2;
-    const parts = text2.split(" ");
-    if (parts.length < 2) return text2;
-    const surname = [parts.pop()];
-    while (parts.length > 1 && PARTICLES.has(parts[parts.length - 1].toLowerCase())) {
-      surname.unshift(parts.pop());
-    }
-    return `${surname.join(" ")}, ${parts.join(" ")}`;
-  }
-  const PARTICLES = new Set(particles);
-  function typeFor(pages2, genres2) {
-    if ((genres2 ?? []).some((genre) => NONFICTION.test(String(genre).trim()))) return "Non-Fiction";
-    return typeForPages(pages2);
-  }
-  const NONFICTION = /^non[-\s]?fiction$/i;
-  function typeForPages(pages2) {
-    const count = Number(pages2);
-    if (!count) return "";
-    if (count <= 40) return "Short Story";
-    if (count <= 300) return "Novella";
-    return "Novel";
   }
   function firstNumber(text2) {
     const match = /-?\d+(?:[.,]\d+)?/.exec(String(text2 ?? "").replace(/(\d),(?=\d{3}\b)/g, "$1"));
@@ -112,7 +33,8 @@
       let value;
       try {
         value = extract();
-      } catch {
+      } catch (error) {
+        console.debug(`Reading Tracker: could not read ${name}`, error);
         value = null;
       }
       if (value === null || value === void 0 || value === "") continue;
@@ -143,6 +65,7 @@
       const element = document.querySelector(selector);
       if (element) onFound(element);
       else if (Date.now() - start < 15e3) setTimeout(check, 100);
+      else console.warn(`Reading Tracker: ${selector} did not appear, so the buttons were not added`);
     })();
   }
   function onNavigate(onChange) {
@@ -196,7 +119,6 @@
     isConfigured() {
       return Boolean(this.values.baseURL && this.values.username);
     }
-    /** The host with any trailing slash taken off, so paths can be appended. */
     origin() {
       return String(this.values.baseURL || "").trim().replace(/\/+$/, "");
     }
@@ -226,6 +148,13 @@
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
     return `${now.getFullYear()}-${month}-${day}`;
+  }
+  function startPatch(input) {
+    return {
+      book_ID: input.book_ID,
+      startedOn: input.startedOn,
+      asAudiobook: input.asAudiobook
+    };
   }
   class ReadingTracker {
     constructor(settings) {
@@ -283,11 +212,7 @@
     }
     /** Opens a session dated today. The owner is stamped by the server. */
     startSession(bookId) {
-      return this.request("POST", "/ReadingSessions", {
-        book_ID: bookId,
-        startedOn: todayISO(),
-        asAudiobook: false
-      });
+      return this.request("POST", "/ReadingSessions", startPatch({ book_ID: bookId, startedOn: todayISO(), asAudiobook: false }));
     }
     /** Closes a session with a `finishPatch`-shaped body. */
     patchSession(id, patch) {
@@ -347,6 +272,54 @@
     } catch {
     }
     return `The tracker answered ${response.status}`;
+  }
+  const MIN_INTEREST = 1;
+  const MAX_INTEREST = 10;
+  function interestOf(typed) {
+    const text2 = String(typed ?? "").trim();
+    const value = Number(text2);
+    if (!text2 || !Number.isFinite(value)) {
+      return null;
+    }
+    return Math.min(MAX_INTEREST, Math.max(MIN_INTEREST, Math.round(value)));
+  }
+  const MONTHS = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december"
+  ];
+  function isoDay(stated) {
+    const text2 = (stated ?? "").trim();
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text2);
+    if (iso) {
+      return dayOf(iso[1], Number(iso[2]) - 1, iso[3]);
+    }
+    const monthFirst = /^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(text2);
+    const dayFirst = /^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/.exec(text2);
+    const parts = monthFirst ? [monthFirst[1], monthFirst[2], monthFirst[3]] : dayFirst ? [dayFirst[2], dayFirst[1], dayFirst[3]] : null;
+    if (!parts) {
+      return void 0;
+    }
+    const [month, day, year] = parts;
+    const index = MONTHS.findIndex((name) => name.startsWith(month.toLowerCase()) && month.length >= 3);
+    return index < 0 ? void 0 : dayOf(year, index, day);
+  }
+  function dayOf(year, month, day) {
+    const date = new Date(Date.UTC(Number(year), month, Number(day)));
+    if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== month || date.getUTCDate() !== Number(day)) {
+      return void 0;
+    }
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${year}-${pad(month + 1)}-${pad(day)}`;
   }
   function el(tag, className, properties = {}) {
     const element = document.createElement(tag);
@@ -413,7 +386,6 @@
     wrapper.append(input, caption);
     return wrapper;
   }
-  const SCALE = 10;
   function askBookDetails({ title, defaults }) {
     return new Promise((resolve) => {
       const state = { ...defaults };
@@ -445,10 +417,10 @@
       field({
         label: "Interest",
         type: "number",
-        min: 1,
-        max: SCALE,
+        min: MIN_INTEREST,
+        max: MAX_INTEREST,
         value: state.interest,
-        hint: `1 to ${SCALE}, which the up next score reads. Leave empty to keep what the shelf holds.`,
+        hint: `${MIN_INTEREST} to ${MAX_INTEREST}, which the up next score reads. Leave empty to keep what the shelf holds.`,
         onInput: (value) => {
           state.interest = value;
         }
@@ -474,17 +446,64 @@
       ownedPhysically: Boolean(ownedPhysically),
       onAudiobookshelf: Boolean(onAudiobookshelf)
     };
-    const score = interestScore(interest);
+    const score = interestOf(interest);
     if (score !== null) fields.interest = score;
     return fields;
   }
-  function interestScore(value) {
-    const text2 = String(value ?? "").trim();
-    if (!text2) return null;
-    const score = Number(text2);
-    if (!Number.isFinite(score)) return null;
-    return Math.min(SCALE, Math.max(1, Math.round(score)));
-  }
+  const t74 = "Finished on";
+  const t75 = "Rating";
+  const t77 = "Gave up";
+  const t78 = "Stopped at %";
+  const t79 = "Final comment";
+  const t80 = "Optional, saved as your final comment on the book";
+  const t81 = "{0} to {1}, optional";
+  const t82 = "Rate it between 1 and 10, or leave the rating empty.";
+  const t83 = "Pick the day you finished it.";
+  const t84 = "That day has not come yet.";
+  const t85 = "You started this on {0}, so it cannot have been finished before then.";
+  const t86 = "Say how far you got, between 0 and 100.";
+  const t737 = "Title";
+  const t738 = "Author";
+  const t739 = "Series";
+  const t740 = "Number in series";
+  const t741 = "Pages";
+  const t742 = "Published";
+  const t743 = "Cover";
+  const t744 = "Description";
+  const t745 = "ISBN";
+  const t746 = "Interest";
+  const t747 = "Owned";
+  const t748 = "On Audiobookshelf";
+  const t749 = "Narrator";
+  const t750 = "Type";
+  const t751 = "Genres";
+  const t752 = "Rating";
+  const t753 = "Ratings";
+  const t754 = "Link";
+  const t755 = "Country";
+  const t756 = "Recommended by";
+  const LABELS = {
+    title: t737,
+    authors: t738,
+    narrator: t749,
+    series: t739,
+    seriesIndex: t740,
+    type: t750,
+    genres: t751,
+    pages: t741,
+    publishedOn: t742,
+    goodreadsRating: t752,
+    goodreadsRatingCount: t753,
+    goodreadsURL: t754,
+    isbn: t745,
+    coverURL: t743,
+    description: t744,
+    country: t755,
+    interest: t746,
+    ownedPhysically: t747,
+    onAudiobookshelf: t748,
+    recommendedBy: t756
+  };
   function askWhatToKeep(changes) {
     return new Promise((resolve) => {
       const body = el("div");
@@ -691,9 +710,11 @@
   }
   const MIN_RATING = 1;
   const MAX_RATING = 10;
+  const MIN_PERCENT = 0;
+  const MAX_PERCENT = 100;
   function isPercentage(value) {
     const number = numberOf(value);
-    return number !== null && number >= 0 && number <= 100;
+    return number !== null && number >= MIN_PERCENT && number <= MAX_PERCENT;
   }
   function isRating(value) {
     const number = numberOf(value);
@@ -734,19 +755,7 @@
     const comment = input.comment.trim();
     return comment ? { book_ID: bookId, comment, isFinal: true } : null;
   }
-  const t73 = "Finished on";
-  const t74 = "Rating";
-  const t76 = "Gave up";
-  const t77 = "Stopped at %";
-  const t78 = "Final comment";
-  const t79 = "Optional, saved as your final comment on the book";
-  const t80 = "{0} to {1}, optional";
-  const t81 = "Rate it between 1 and 10, or leave the rating empty.";
-  const t82 = "Pick the day you finished it.";
-  const t83 = "That day has not come yet.";
-  const t84 = "You started this on {0}, so it cannot have been finished before then.";
-  const t85 = "Say how far you got, between 0 and 100.";
-  const HINTS = { finishNoDate: t82, finishFuture: t83, finishBeforeStart: t84, finishBadRating: t81, finishBadPercentage: t85 };
+  const HINTS = { finishNoDate: t83, finishFuture: t84, finishBeforeStart: t85, finishBadRating: t82, finishBadPercentage: t86 };
   function fill(text2, ...values) {
     return text2.replace(/\{(\d+)\}/g, (_, index) => values[index] ?? "");
   }
@@ -756,10 +765,10 @@
       const body = el("div");
       const hint = el("div", "bt-hint", { textContent: "" });
       const stoppedField = field({
-        label: t77,
+        label: t78,
         type: "number",
-        min: 0,
-        max: 100,
+        min: MIN_PERCENT,
+        max: MAX_PERCENT,
         value: state.stoppedAt,
         onInput: (value) => {
           state.stoppedAt = value;
@@ -806,7 +815,7 @@
   function finishFields(state, onDnfChange) {
     return [
       field({
-        label: t73,
+        label: t74,
         type: "date",
         value: state.finishedOn,
         onInput: (value) => {
@@ -814,18 +823,18 @@
         }
       }),
       field({
-        label: t74,
+        label: t75,
         type: "number",
         min: MIN_RATING,
         max: MAX_RATING,
         value: state.rating,
-        hint: fill(t80, MIN_RATING, MAX_RATING),
+        hint: fill(t81, MIN_RATING, MAX_RATING),
         onInput: (value) => {
           state.rating = value;
         }
       }),
       checkbox({
-        label: t76,
+        label: t77,
         checked: state.didNotFinish,
         onChange: (value) => {
           state.didNotFinish = value;
@@ -836,9 +845,9 @@
   }
   function verdictField(state) {
     return textArea({
-      label: t78,
+      label: t79,
       value: state.comment,
-      placeholder: t79,
+      placeholder: t80,
       onInput: (value) => {
         state.comment = value;
       }
@@ -995,7 +1004,6 @@
   function pageFields(fields) {
     return {
       ...fields,
-      type: () => typeFor(fields.pages(), fields.genres()),
       goodreadsURL: () => canonical().split("?")[0]
     };
   }
@@ -1017,44 +1025,6 @@
     sessions.refresh();
     return { bar, sessions };
   }
-  const MONTHS = [
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december"
-  ];
-  function isoDay(stated) {
-    const text2 = (stated ?? "").trim();
-    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text2);
-    if (iso) {
-      return dayOf(iso[1], Number(iso[2]) - 1, iso[3]);
-    }
-    const monthFirst = /^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(text2);
-    const dayFirst = /^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/.exec(text2);
-    const parts = monthFirst ? [monthFirst[1], monthFirst[2], monthFirst[3]] : dayFirst ? [dayFirst[2], dayFirst[1], dayFirst[3]] : null;
-    if (!parts) {
-      return void 0;
-    }
-    const [month, day, year] = parts;
-    const index = MONTHS.findIndex((name) => name.startsWith(month.toLowerCase()) && month.length >= 3);
-    return index < 0 ? void 0 : dayOf(year, index, day);
-  }
-  function dayOf(year, month, day) {
-    const date = new Date(Date.UTC(Number(year), month, Number(day)));
-    if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== month || date.getUTCDate() !== Number(day)) {
-      return void 0;
-    }
-    const pad = (value) => String(value).padStart(2, "0");
-    return `${year}-${pad(month + 1)}-${pad(day)}`;
-  }
   const HEADER = ".book-title-author-and-series";
   function header() {
     return document.querySelector(HEADER);
@@ -1070,7 +1040,7 @@
     return found;
   }
   function authors() {
-    return people((text2) => !/translator|narrator/i.test(text2)).map(lastFirst);
+    return people((text2) => !/translator|narrator/i.test(text2));
   }
   function pages() {
     for (const element of document.querySelectorAll(".toggle-edition-info-link, .edition-info p")) {
@@ -1105,7 +1075,7 @@
   const FIELDS = {
     title: () => text(`${HEADER} h3.font-serif`, `${HEADER} h3.font-semibold`),
     authors,
-    narrator: () => people((text2) => /narrator/i.test(text2)).map(lastFirst)[0] ?? "",
+    narrator: () => people((text2) => /narrator/i.test(text2))[0] ?? "",
     series: () => seriesLinks()[0]?.textContent.trim() ?? "",
     seriesIndex: () => firstNumber(seriesLinks()[1]?.textContent ?? ""),
     genres,
