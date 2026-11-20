@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Goodreads to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.99
+// @version      1.0.103
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a Goodreads book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -471,47 +471,47 @@
   const t84 = "That day has not come yet.";
   const t85 = "You started this on {0}, so it cannot have been finished before then.";
   const t86 = "Say how far you got, between 0 and 100.";
-  const t737 = "Title";
-  const t738 = "Author";
-  const t739 = "Series";
-  const t740 = "Number in series";
-  const t741 = "Pages";
-  const t742 = "Published";
-  const t743 = "Cover";
-  const t744 = "Description";
-  const t745 = "ISBN";
-  const t746 = "Interest";
-  const t747 = "Owned";
-  const t748 = "On Audiobookshelf";
-  const t749 = "Narrator";
-  const t750 = "Type";
-  const t751 = "Genres";
-  const t752 = "Rating";
-  const t753 = "Ratings";
-  const t754 = "Link";
-  const t755 = "Country";
-  const t756 = "Recommended by";
+  const t739 = "Title";
+  const t740 = "Author";
+  const t741 = "Series";
+  const t742 = "Number in series";
+  const t743 = "Pages";
+  const t744 = "Published";
+  const t745 = "Cover";
+  const t746 = "Description";
+  const t747 = "ISBN";
+  const t748 = "Interest";
+  const t749 = "Owned";
+  const t750 = "On Audiobookshelf";
+  const t751 = "Narrator";
+  const t752 = "Type";
+  const t753 = "Genres";
+  const t754 = "Rating";
+  const t755 = "Ratings";
+  const t756 = "Link";
+  const t757 = "Country";
+  const t758 = "Recommended by";
   const LABELS = {
-    title: t737,
-    authors: t738,
-    narrator: t749,
-    series: t739,
-    seriesIndex: t740,
-    type: t750,
-    genres: t751,
-    pages: t741,
-    publishedOn: t742,
-    goodreadsRating: t752,
-    goodreadsRatingCount: t753,
-    goodreadsURL: t754,
-    isbn: t745,
-    coverURL: t743,
-    description: t744,
-    country: t755,
-    interest: t746,
-    ownedPhysically: t747,
-    onAudiobookshelf: t748,
-    recommendedBy: t756
+    title: t739,
+    authors: t740,
+    narrator: t751,
+    series: t741,
+    seriesIndex: t742,
+    type: t752,
+    genres: t753,
+    pages: t743,
+    publishedOn: t744,
+    goodreadsRating: t754,
+    goodreadsRatingCount: t755,
+    goodreadsURL: t756,
+    isbn: t747,
+    coverURL: t745,
+    description: t746,
+    country: t757,
+    interest: t748,
+    ownedPhysically: t749,
+    onAudiobookshelf: t750,
+    recommendedBy: t758
   };
   function askWhatToKeep(changes) {
     return new Promise((resolve) => {
