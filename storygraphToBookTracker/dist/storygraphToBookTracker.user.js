@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.103
+// @version      1.0.101
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
 // @downloadURL  https://raw.githubusercontent.com/LaurinSorgend/userscripts/main/storygraphToBookTracker/dist/storygraphToBookTracker.user.js
 // @updateURL    https://raw.githubusercontent.com/LaurinSorgend/userscripts/main/storygraphToBookTracker/dist/storygraphToBookTracker.meta.js
-// @match        https://app.thestorygraph.com/books/*
+// @match        https://app.thestorygraph.com/*
 // @connect      *
 // @grant        GM_addStyle
 // @grant        GM_getValue
@@ -20,8 +20,11 @@
   'use strict';
 
   function isbnIn(text2) {
-    const compact = String(text2 ?? "").replace(/(\d)[\s-](?=[\dXx])/g, "$1");
-    return /\b97[89]\d{10}\b/.exec(compact)?.[0] ?? /\b\d{9}[\dXx]\b/.exec(compact)?.[0].toUpperCase() ?? "";
+    const raw = String(text2 ?? "");
+    const thirteen = new RegExp("(?<![0-9])97[89](?:-?\\d){10}(?![0-9])").exec(raw)?.[0];
+    if (thirteen) return thirteen.replace(/-/g, "");
+    const ten = new RegExp("(?<![0-9A-Za-z])\\d(?:-?\\d){8}-?[\\dXx](?![0-9A-Za-z])").exec(raw)?.[0];
+    return ten ? ten.replace(/-/g, "").toUpperCase() : "";
   }
   function firstNumber(text2) {
     const match = /-?\d+(?:[.,]\d+)?/.exec(String(text2 ?? "").replace(/(\d),(?=\d{3}\b)/g, "$1"));
@@ -59,22 +62,40 @@
   function canonical() {
     return document.querySelector('link[rel="canonical"]')?.href ?? window.location.href;
   }
-  function waitFor(selector, onFound) {
+  function waitFor(selector, onFound, { previous } = {}) {
     const start = Date.now();
+    let cancelled = false;
+    let timer = null;
     (function check() {
+      if (cancelled) return;
       const element = document.querySelector(selector);
-      if (element) onFound(element);
-      else if (Date.now() - start < 15e3) setTimeout(check, 100);
-      else console.warn(`Reading Tracker: ${selector} did not appear, so the buttons were not added`);
+      const unchanged = previous && element === previous.element && element.textContent.trim() === previous.text;
+      if (element && !unchanged) {
+        onFound(element);
+      } else if (Date.now() - start < 15e3) {
+        timer = setTimeout(check, 100);
+      } else {
+        console.warn(`Reading Tracker: ${selector} did not appear, so the buttons were not added`);
+      }
     })();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }
   function onNavigate(onChange) {
     let current = window.location.href;
-    new MutationObserver(() => {
+    const notify = () => {
       if (window.location.href === current) return;
       current = window.location.href;
       onChange(current);
-    }).observe(document.body, { childList: true, subtree: true });
+    };
+    new MutationObserver(notify).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("turbo:load", () => {
+      current = window.location.href;
+      onChange(current);
+    });
+    window.addEventListener("popstate", notify);
   }
   var _GM_addStyle = /* @__PURE__ */ (() => typeof GM_addStyle != "undefined" ? GM_addStyle : void 0)();
   var _GM_getValue = /* @__PURE__ */ (() => typeof GM_getValue != "undefined" ? GM_getValue : void 0)();
@@ -92,6 +113,20 @@
     /** Ask before overwriting a field that already has something in it. */
     confirmOverwrites: true
   };
+  function parseOrigin(raw) {
+    const value = String(raw ?? "").trim();
+    if (!value) return "";
+    try {
+      const url = new URL(value);
+      const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+      if (url.protocol === "https:" || url.protocol === "http:" && local) {
+        return url.origin;
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }
   class Settings {
     constructor(storageKey) {
       this.storageKey = storageKey;
@@ -115,16 +150,18 @@
       this.values[key] = value;
       this.save();
     }
-    /** True once a book could actually be sent somewhere. */
+    /** True once a book could actually be sent somewhere over a valid server URL. */
     isConfigured() {
-      return Boolean(this.values.baseURL && this.values.username);
+      return Boolean(this.origin() && String(this.values.username || "").trim());
     }
     origin() {
-      return String(this.values.baseURL || "").trim().replace(/\/+$/, "");
+      return parseOrigin(this.values.baseURL);
     }
     /** The book's page in the app, or the books list when the id is not known. */
     shelfLink(bookId) {
-      return bookId ? { href: `${this.origin()}/#/books/${bookId}`, label: "Open book" } : { href: `${this.origin()}/#/list/Books`, label: "Open shelf" };
+      const origin = this.origin();
+      if (!origin) return void 0;
+      return bookId ? { href: `${origin}/#/books/${bookId}`, label: "Open book" } : { href: `${origin}/#/list/Books`, label: "Open shelf" };
     }
     /**
      * The fields the friend fills in once rather than per book. Interest and
@@ -212,7 +249,11 @@
     }
     /** Opens a session dated today. The owner is stamped by the server. */
     startSession(bookId) {
-      return this.request("POST", "/ReadingSessions", startPatch({ book_ID: bookId, startedOn: todayISO(), asAudiobook: false }));
+      return this.request(
+        "POST",
+        "/ReadingSessions",
+        startPatch({ book_ID: bookId, startedOn: todayISO(), asAudiobook: false })
+      );
     }
     /** Closes a session with a `finishPatch`-shaped body. */
     patchSession(id, patch) {
@@ -232,6 +273,11 @@
     }
     request(method, path, body) {
       return new Promise((resolve, reject) => {
+        const origin = this.settings.origin();
+        if (!origin) {
+          reject(new Error("Set a valid HTTPS server URL in Settings first"));
+          return;
+        }
         _GM_xmlhttpRequest({
           method,
           url: this.service + path,
@@ -244,18 +290,23 @@
           timeout: 2e4,
           onload: (response) => {
             if (response.status >= 200 && response.status < 300) {
-              settle(resolve, reject, response.responseText);
+              settle(resolve, reject, response.status, response.responseText);
             } else {
               reject(new Error(messageFor(response)));
             }
           },
-          onerror: () => reject(new Error(`Could not reach ${this.settings.origin()}`)),
+          onerror: () => reject(new Error(`Could not reach ${origin}`)),
+          onabort: () => reject(new Error("The request was aborted")),
           ontimeout: () => reject(new Error("The tracker took too long to answer"))
         });
       });
     }
   }
-  function settle(resolve, reject, text2) {
+  function settle(resolve, reject, status, text2) {
+    if (status === 204 || !String(text2 ?? "").trim()) {
+      resolve(null);
+      return;
+    }
     try {
       resolve(JSON.parse(text2));
     } catch {
@@ -314,8 +365,11 @@
     return index < 0 ? void 0 : dayOf(year, index, day);
   }
   function dayOf(year, month, day) {
-    const date = new Date(Date.UTC(Number(year), month, Number(day)));
-    if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== month || date.getUTCDate() !== Number(day)) {
+    const numericYear = Number(year);
+    const numericDay = Number(day);
+    const date = new Date(Date.UTC(numericYear, month, numericDay));
+    date.setUTCFullYear(numericYear);
+    if (date.getUTCFullYear() !== numericYear || date.getUTCMonth() !== month || date.getUTCDate() !== numericDay) {
       return void 0;
     }
     const pad = (value) => String(value).padStart(2, "0");
@@ -330,7 +384,9 @@
   function button(label, className = "bt-button") {
     return el("button", className, { type: "button", textContent: label });
   }
+  let closeActive = null;
   function panel({ title, body, footer = [] }) {
+    closeActive?.();
     const backdrop = el("div", "bt-backdrop");
     const card = el("div", "bt-panel");
     const content = el("div", "bt-panel__body");
@@ -338,14 +394,23 @@
     card.append(el("h2", null, { textContent: title }), content, buttons);
     content.append(body);
     backdrop.append(card);
+    let closed = false;
     const close = () => {
+      if (closed) return;
+      closed = true;
+      if (closeActive === close) closeActive = null;
       backdrop.dispatchEvent(new CustomEvent("bt-closed"));
       backdrop.remove();
       document.removeEventListener("keydown", onKey);
     };
     const onKey = (event) => {
+      if (!backdrop.isConnected) {
+        close();
+        return;
+      }
       if (event.key === "Escape") close();
     };
+    closeActive = close;
     for (const { label, quiet, onClick } of footer) {
       const element = button(label, quiet ? "bt-button bt-button--quiet" : "bt-button");
       element.addEventListener("click", () => {
@@ -360,11 +425,12 @@
     document.body.append(backdrop);
     return { onClose: (handler) => backdrop.addEventListener("bt-closed", handler) };
   }
-  function field({ label, value, type = "text", hint, min, max, onInput }) {
+  function field({ label, value, type = "text", hint, min, max, step, onInput }) {
     const wrapper = el("div", "bt-field");
     const input = el("input", null, { type, value: value ?? "" });
     if (min !== void 0) input.min = String(min);
     if (max !== void 0) input.max = String(max);
+    if (step !== void 0) input.step = String(step);
     wrapper.append(el("label", null, { textContent: label }), input);
     if (hint) wrapper.append(el("div", "bt-hint", { textContent: hint }));
     input.addEventListener("input", () => onInput(input.value));
@@ -450,67 +516,69 @@
     if (score !== null) fields.interest = score;
     return fields;
   }
-  const t74 = "Finished on";
-  const t75 = "Rating";
-  const t77 = "Gave up";
-  const t78 = "Stopped at %";
-  const t79 = "Final comment";
-  const t80 = "Optional, saved as your final comment on the book";
-  const t81 = "{0} to {1}, optional";
-  const t82 = "Rate it between 1 and 10, or leave the rating empty.";
-  const t83 = "Pick the day you finished it.";
-  const t84 = "That day has not come yet.";
-  const t85 = "You started this on {0}, so it cannot have been finished before then.";
-  const t86 = "Say how far you got, between 0 and 100.";
-  const t739 = "Title";
-  const t740 = "Author";
-  const t741 = "Series";
-  const t742 = "Number in series";
-  const t743 = "Pages";
-  const t744 = "Published";
-  const t745 = "Cover";
-  const t746 = "Description";
-  const t747 = "ISBN";
-  const t748 = "Interest";
-  const t749 = "Owned";
-  const t750 = "On Audiobookshelf";
-  const t751 = "Narrator";
-  const t752 = "Type";
-  const t753 = "Genres";
-  const t754 = "Rating";
-  const t755 = "Ratings";
-  const t756 = "Link";
-  const t757 = "Country";
-  const t758 = "Recommended by";
+  const t75 = "Finished on";
+  const t76 = "Rating";
+  const t78 = "Gave up";
+  const t79 = "Stopped at %";
+  const t80 = "Final comment";
+  const t81 = "Optional, saved as your final comment on the book";
+  const t82 = "{0} to {1}, optional";
+  const t83 = "Rate it between 1 and 10, or leave the rating empty.";
+  const t84 = "Pick the day you finished it.";
+  const t85 = "That day has not come yet.";
+  const t86 = "You started this on {0}, so it cannot have been finished before then.";
+  const t87 = "Say how far you got, between 0 and 100.";
+  const t741 = "Title";
+  const t742 = "Author";
+  const t743 = "Series";
+  const t744 = "Number in series";
+  const t745 = "Pages";
+  const t746 = "Published";
+  const t747 = "Cover";
+  const t748 = "Description";
+  const t749 = "ISBN";
+  const t750 = "Interest";
+  const t751 = "Owned";
+  const t752 = "On Audiobookshelf";
+  const t753 = "Narrator";
+  const t754 = "Type";
+  const t755 = "Genres";
+  const t756 = "Rating";
+  const t757 = "Ratings";
+  const t758 = "Link";
+  const t759 = "Country";
+  const t760 = "Recommended by";
   const LABELS = {
-    title: t739,
-    authors: t740,
-    narrator: t751,
-    series: t741,
-    seriesIndex: t742,
-    type: t752,
-    genres: t753,
-    pages: t743,
-    publishedOn: t744,
-    goodreadsRating: t754,
-    goodreadsRatingCount: t755,
-    goodreadsURL: t756,
-    isbn: t747,
-    coverURL: t745,
-    description: t746,
-    country: t757,
-    interest: t748,
-    ownedPhysically: t749,
-    onAudiobookshelf: t750,
-    recommendedBy: t758
+    title: t741,
+    authors: t742,
+    narrator: t753,
+    series: t743,
+    seriesIndex: t744,
+    type: t754,
+    genres: t755,
+    pages: t745,
+    publishedOn: t746,
+    goodreadsRating: t756,
+    goodreadsRatingCount: t757,
+    goodreadsURL: t758,
+    isbn: t749,
+    coverURL: t747,
+    description: t748,
+    country: t759,
+    interest: t750,
+    ownedPhysically: t751,
+    onAudiobookshelf: t752,
+    recommendedBy: t760
   };
   function askWhatToKeep(changes) {
     return new Promise((resolve) => {
       const body = el("div");
       const keep = new Set(changes.map((change) => change.field));
-      body.append(el("p", null, {
-        textContent: "This book is already on your shelf. Untick anything the page should not overwrite."
-      }));
+      body.append(
+        el("p", null, {
+          textContent: "This book is already on your shelf. Untick anything the page should not overwrite."
+        })
+      );
       for (const change of changes) body.append(row(change, keep));
       let answered = false;
       const answer = (value) => {
@@ -549,11 +617,21 @@
     return wrapper;
   }
   let showing = null;
+  function safeHref(href) {
+    if (!href) return null;
+    try {
+      const url = new URL(String(href));
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
   function toast(message, { error = false, link, ms = 4e3 } = {}) {
     showing?.remove();
     const element = el("div", `bt-toast${error ? " bt-toast--error" : ""}`, { textContent: message });
-    if (link) {
-      element.append(" ", el("a", null, { href: link.href, textContent: link.label, target: "_blank", rel: "noreferrer" }));
+    const href = safeHref(link?.href);
+    if (href) {
+      element.append(" ", el("a", null, { href, textContent: link.label, target: "_blank", rel: "noreferrer" }));
     }
     document.body.append(element);
     requestAnimationFrame(() => element.classList.add("bt-toast--shown"));
@@ -577,7 +655,7 @@
       button2.textContent = label;
     }
   }
-  function openSettings(settings, tracker) {
+  function openSettings(settings, tracker, onClose) {
     const body = el("div");
     body.append(
       el("p", null, { textContent: "Books are filed under the friend these credentials belong to." }),
@@ -588,11 +666,12 @@
       el("h2", null, { textContent: "Sent with every book" }),
       ...defaultFields(settings)
     );
-    panel({
+    const modal = panel({
       title: "Reading Tracker",
       body,
       footer: [{ label: "Done" }]
     });
+    if (onClose) modal.onClose(onClose);
   }
   function connectionFields(settings) {
     return [
@@ -676,6 +755,10 @@
       openSettings(settings, tracker);
       return;
     }
+    if (!book?.title) {
+      toast("Could not read the book title from this page", { error: true });
+      return;
+    }
     const details = await askBookDetails({ title: book.title, defaults: settings.askedDefaults() });
     if (!details) {
       toast("Nothing sent");
@@ -693,7 +776,7 @@
       return;
     }
     const result = await tracker.importBook(sending, { fields });
-    const message = result.action === "created" ? "Added to your shelf" : `Updated ${result.changes.length} field(s)`;
+    const message = result.action === "created" ? "Added to your shelf" : result.action === "unchanged" || !result.changes?.length ? "Already up to date" : `Updated ${result.changes.length} field(s)`;
     toast(message, { link: settings.shelfLink(result.book_ID) });
   }
   async function fieldsToWrite(preview, settings) {
@@ -743,19 +826,20 @@
     return null;
   }
   function finishPatch(input) {
+    const stopped = input.didNotFinish ? numberOf(input.stoppedAt) : null;
     return {
       finishedOn: input.finishedOn,
       personalRating: isRated(input.rating) ? String(numberOf(input.rating)) : null,
       asAudiobook: input.asAudiobook,
       didNotFinish: input.didNotFinish,
-      didNotFinishAtPercentage: input.didNotFinish && input.stoppedAt !== null ? String(input.stoppedAt) : null
+      didNotFinishAtPercentage: stopped !== null ? String(stopped) : null
     };
   }
   function finalComment(input, bookId) {
     const comment = input.comment.trim();
     return comment ? { book_ID: bookId, comment, isFinal: true } : null;
   }
-  const HINTS = { finishNoDate: t83, finishFuture: t84, finishBeforeStart: t85, finishBadRating: t82, finishBadPercentage: t86 };
+  const HINTS = { finishNoDate: t84, finishFuture: t85, finishBeforeStart: t86, finishBadRating: t83, finishBadPercentage: t87 };
   function fill(text2, ...values) {
     return text2.replace(/\{(\d+)\}/g, (_, index) => values[index] ?? "");
   }
@@ -765,10 +849,11 @@
       const body = el("div");
       const hint = el("div", "bt-hint", { textContent: "" });
       const stoppedField = field({
-        label: t78,
+        label: t79,
         type: "number",
         min: MIN_PERCENT,
         max: MAX_PERCENT,
+        step: "any",
         value: state.stoppedAt,
         onInput: (value) => {
           state.stoppedAt = value;
@@ -815,7 +900,7 @@
   function finishFields(state, onDnfChange) {
     return [
       field({
-        label: t74,
+        label: t75,
         type: "date",
         value: state.finishedOn,
         onInput: (value) => {
@@ -823,18 +908,19 @@
         }
       }),
       field({
-        label: t75,
+        label: t76,
         type: "number",
         min: MIN_RATING,
         max: MAX_RATING,
+        step: "any",
         value: state.rating,
-        hint: fill(t81, MIN_RATING, MAX_RATING),
+        hint: fill(t82, MIN_RATING, MAX_RATING),
         onInput: (value) => {
           state.rating = value;
         }
       }),
       checkbox({
-        label: t77,
+        label: t78,
         checked: state.didNotFinish,
         onChange: (value) => {
           state.didNotFinish = value;
@@ -845,9 +931,9 @@
   }
   function verdictField(state) {
     return textArea({
-      label: t79,
+      label: t80,
       value: state.comment,
-      placeholder: t80,
+      placeholder: t81,
       onInput: (value) => {
         state.comment = value;
       }
@@ -859,9 +945,10 @@
     let state = null;
     let pass = 0;
     button$1.addEventListener("click", () => {
-      if (!state) return;
-      if (state.session) finishReading();
-      else startReading();
+      const current = state;
+      if (!current) return;
+      if (current.session) finishReading(current);
+      else startReading(current);
     });
     async function refresh() {
       const mine = ++pass;
@@ -878,23 +965,24 @@
         toast(error.message, { error: true, ms: 6e3 });
       }
     }
-    async function startReading() {
+    async function startReading(current) {
+      const { book_ID: bookId } = current;
       await whileBusy(button$1, "Working…", async () => {
-        await tracker.startSession(state.book_ID);
-        toast("Reading started", { link: settings.shelfLink(state.book_ID) });
+        await tracker.startSession(bookId);
+        toast("Reading started", { link: settings.shelfLink(bookId) });
       });
       await refresh();
     }
-    async function finishReading() {
-      const session = state.session;
-      const answer = await askFinished(session, state.book_ID);
+    async function finishReading(current) {
+      const { session, book_ID: bookId } = current;
+      const answer = await askFinished(session, bookId);
       if (!answer) return;
       const { patch, comment } = answer;
       await whileBusy(button$1, "Working…", async () => {
         await tracker.patchSession(session.ID, patch);
         if (comment) await tracker.createFinalComment(comment);
         const message = patch.didNotFinish ? "Marked as did not finish" : "Finished";
-        toast(message, { link: settings.shelfLink(state.book_ID) });
+        toast(message, { link: settings.shelfLink(bookId) });
       });
       await refresh();
     }
@@ -928,13 +1016,6 @@
     color: #4c4f69; background: #ccd0da; border-color: #9ca0b0;
 }
 .bt-button--quiet:hover { filter: brightness(.9); }
-
-.bt-spinner {
-    width: 12px; height: 12px; border-radius: 0;
-    border: 2px solid rgba(239,241,245,.4); border-top-color: #eff1f5;
-    animation: bt-spin .7s linear infinite;
-}
-@keyframes bt-spin { to { transform: rotate(360deg); } }
 
 .bt-toast {
     position: fixed; right: 20px; bottom: 20px; z-index: 2147483647;
@@ -988,18 +1069,31 @@
   function addStyles() {
     _GM_addStyle(CSS);
   }
-  function mountTracker({ name, anchor, ready, fields }) {
+  function mountTracker({ name, anchor, ready, fields, matchPath }) {
     const settings = new Settings(name);
     const tracker = new ReadingTracker(settings);
     const getBook = () => ({ ...scrape(pageFields(fields)), ...settings.bookDefaults() });
     let mounted = null;
-    const mount = () => {
+    let cancelWait = null;
+    let lastReady = null;
+    const isBookPage = () => !matchPath || matchPath.test(window.location.pathname);
+    const mount = (element) => {
+      lastReady = { element, text: element.textContent.trim() };
       if (mounted?.bar.isConnected) mounted.sessions.refresh();
       else mounted = mountBar(anchor, getBook, settings, tracker);
     };
+    const scheduleMount = (previous) => {
+      cancelWait?.();
+      cancelWait = null;
+      if (!isBookPage()) {
+        mounted = null;
+        return;
+      }
+      cancelWait = waitFor(ready, mount, { previous });
+    };
     addStyles();
-    waitFor(ready, mount);
-    onNavigate(() => waitFor(ready, mount));
+    scheduleMount(null);
+    onNavigate(() => scheduleMount(lastReady));
   }
   function pageFields(fields) {
     return {
@@ -1010,6 +1104,7 @@
   function mountBar(anchor, getBook, settings, tracker) {
     const parent = document.querySelector(anchor);
     if (!parent) return null;
+    parent.querySelectorAll(".bt-actions").forEach((stale) => stale.remove());
     const bar = el("div", "bt-actions");
     bar.style.cssText = "display:flex; gap:8px; margin:12px 0;";
     const sessions = createSessionControls({ tracker, settings, getBook });
@@ -1019,7 +1114,7 @@
       await whileBusy(send, "Sending…", () => sendBook(getBook(), { tracker, settings }));
       sessions.refresh();
     });
-    configure.addEventListener("click", () => openSettings(settings, tracker));
+    configure.addEventListener("click", () => openSettings(settings, tracker, () => sessions.refresh()));
     bar.append(send, sessions.element, configure);
     parent.append(bar);
     sessions.refresh();
@@ -1044,8 +1139,8 @@
   }
   function pages() {
     for (const element of document.querySelectorAll(".toggle-edition-info-link, .edition-info p")) {
-      const match = /^(\d+)\s+pages$/.exec(element.textContent.trim());
-      if (match) return Number(match[1]);
+      const match = /^(\d[\d,]*)\s+pages$/i.exec(element.textContent.trim());
+      if (match) return firstNumber(match[1]);
     }
     return null;
   }
@@ -1083,7 +1178,9 @@
     publishedOn: published,
     goodreadsRating: () => firstNumber((reviews() ?? document).querySelector(".average-star-rating")?.textContent ?? ""),
     goodreadsRatingCount: () => firstNumber(
-      /based on (\d+) reviews/.exec(reviews()?.querySelector('[aria-label*="based on"]')?.getAttribute("aria-label") ?? "")?.[1] ?? ""
+      /based on ([\d,]+) reviews/i.exec(
+        reviews()?.querySelector('[aria-label*="based on"]')?.getAttribute("aria-label") ?? ""
+      )?.[1] ?? ""
     ),
     isbn,
     coverURL: () => meta("og:image"),
@@ -1093,7 +1190,8 @@
     name: "storygraphToBookTracker",
     anchor: HEADER,
     ready: `${HEADER} h3`,
-    fields: FIELDS
+    fields: FIELDS,
+    matchPath: /^\/books\//
   });
 
 })();
