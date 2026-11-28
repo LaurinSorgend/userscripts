@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StoryGraph to Reading Tracker
 // @namespace    https://github.com/laurinsorgend
-// @version      1.0.101
+// @version      1.0.103
 // @author       laurin@sorgend.eu
 // @description  Adds a button to a StoryGraph book page that puts the book on your reading tracker shelf
 // @supportURL   https://github.com/LaurinSorgend/userscripts/issues
@@ -516,59 +516,59 @@
     if (score !== null) fields.interest = score;
     return fields;
   }
-  const t75 = "Finished on";
-  const t76 = "Rating";
-  const t78 = "Gave up";
-  const t79 = "Stopped at %";
-  const t80 = "Final comment";
-  const t81 = "Optional, saved as your final comment on the book";
-  const t82 = "{0} to {1}, optional";
-  const t83 = "Rate it between 1 and 10, or leave the rating empty.";
-  const t84 = "Pick the day you finished it.";
-  const t85 = "That day has not come yet.";
-  const t86 = "You started this on {0}, so it cannot have been finished before then.";
-  const t87 = "Say how far you got, between 0 and 100.";
-  const t741 = "Title";
-  const t742 = "Author";
-  const t743 = "Series";
-  const t744 = "Number in series";
-  const t745 = "Pages";
-  const t746 = "Published";
-  const t747 = "Cover";
-  const t748 = "Description";
-  const t749 = "ISBN";
-  const t750 = "Interest";
-  const t751 = "Owned";
-  const t752 = "On Audiobookshelf";
-  const t753 = "Narrator";
-  const t754 = "Type";
-  const t755 = "Genres";
-  const t756 = "Rating";
-  const t757 = "Ratings";
-  const t758 = "Link";
-  const t759 = "Country";
-  const t760 = "Recommended by";
+  const t78 = "Finished on";
+  const t79 = "Rating";
+  const t81 = "Gave up";
+  const t82 = "Stopped at %";
+  const t83 = "Final comment";
+  const t84 = "Optional, saved as your final comment on the book";
+  const t85 = "{0} to {1}, optional";
+  const t86 = "Rate it between 1 and 10, or leave the rating empty.";
+  const t87 = "Pick the day you finished it.";
+  const t88 = "That day has not come yet.";
+  const t89 = "You started this on {0}, so it cannot have been finished before then.";
+  const t90 = "Say how far you got, between 0 and 100.";
+  const t750 = "Title";
+  const t751 = "Author";
+  const t752 = "Series";
+  const t753 = "Number in series";
+  const t754 = "Pages";
+  const t755 = "Published";
+  const t756 = "Cover";
+  const t757 = "Description";
+  const t758 = "ISBN";
+  const t759 = "Interest";
+  const t760 = "Owned";
+  const t761 = "On Audiobookshelf";
+  const t762 = "Narrator";
+  const t763 = "Type";
+  const t764 = "Genres";
+  const t765 = "Rating";
+  const t766 = "Ratings";
+  const t767 = "Link";
+  const t768 = "Country";
+  const t769 = "Recommended by";
   const LABELS = {
-    title: t741,
-    authors: t742,
-    narrator: t753,
-    series: t743,
-    seriesIndex: t744,
-    type: t754,
-    genres: t755,
-    pages: t745,
-    publishedOn: t746,
-    goodreadsRating: t756,
-    goodreadsRatingCount: t757,
-    goodreadsURL: t758,
-    isbn: t749,
-    coverURL: t747,
-    description: t748,
-    country: t759,
-    interest: t750,
-    ownedPhysically: t751,
-    onAudiobookshelf: t752,
-    recommendedBy: t760
+    title: t750,
+    authors: t751,
+    narrator: t762,
+    series: t752,
+    seriesIndex: t753,
+    type: t763,
+    genres: t764,
+    pages: t754,
+    publishedOn: t755,
+    goodreadsRating: t765,
+    goodreadsRatingCount: t766,
+    goodreadsURL: t767,
+    isbn: t758,
+    coverURL: t756,
+    description: t757,
+    country: t768,
+    interest: t759,
+    ownedPhysically: t760,
+    onAudiobookshelf: t761,
+    recommendedBy: t769
   };
   function askWhatToKeep(changes) {
     return new Promise((resolve) => {
@@ -839,7 +839,7 @@
     const comment = input.comment.trim();
     return comment ? { book_ID: bookId, comment, isFinal: true } : null;
   }
-  const HINTS = { finishNoDate: t84, finishFuture: t85, finishBeforeStart: t86, finishBadRating: t83, finishBadPercentage: t87 };
+  const HINTS = { finishNoDate: t87, finishFuture: t88, finishBeforeStart: t89, finishBadRating: t86, finishBadPercentage: t90 };
   function fill(text2, ...values) {
     return text2.replace(/\{(\d+)\}/g, (_, index) => values[index] ?? "");
   }
@@ -849,7 +849,7 @@
       const body = el("div");
       const hint = el("div", "bt-hint", { textContent: "" });
       const stoppedField = field({
-        label: t79,
+        label: t82,
         type: "number",
         min: MIN_PERCENT,
         max: MAX_PERCENT,
@@ -900,7 +900,7 @@
   function finishFields(state, onDnfChange) {
     return [
       field({
-        label: t75,
+        label: t78,
         type: "date",
         value: state.finishedOn,
         onInput: (value) => {
@@ -908,19 +908,19 @@
         }
       }),
       field({
-        label: t76,
+        label: t79,
         type: "number",
         min: MIN_RATING,
         max: MAX_RATING,
         step: "any",
         value: state.rating,
-        hint: fill(t82, MIN_RATING, MAX_RATING),
+        hint: fill(t85, MIN_RATING, MAX_RATING),
         onInput: (value) => {
           state.rating = value;
         }
       }),
       checkbox({
-        label: t78,
+        label: t81,
         checked: state.didNotFinish,
         onChange: (value) => {
           state.didNotFinish = value;
@@ -931,9 +931,9 @@
   }
   function verdictField(state) {
     return textArea({
-      label: t80,
+      label: t83,
       value: state.comment,
-      placeholder: t81,
+      placeholder: t84,
       onInput: (value) => {
         state.comment = value;
       }
